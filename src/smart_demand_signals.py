@@ -233,7 +233,41 @@ def _technical_alert(r):
         win = 30
     return tipo, motivo, prio, impact, urg, canal, win
 
+def generate_cross_sell_recommendations(ventas: pd.DataFrame, alerts: pd.DataFrame) -> pd.DataFrame:
+    """
+    Afegeix una recomanació de producte (Cross-Selling) per a cada client
+    basada en els productes més populars de la seva categoria que encara no ha comprat.
+    """
+    # 1. Trobar els productes més venuts globals per CATEGORIA (més segur que familia)
+    top_products_by_category = (
+        ventas.groupby(['categoria_h', 'id_producto'])['unidades']
+        .sum().reset_index()
+        .sort_values(['categoria_h', 'unidades'], ascending=[True, False])
+        .groupby('categoria_h').first().reset_index()
+    )
+    top_dict = dict(zip(top_products_by_category['categoria_h'], top_products_by_category['id_producto']))
 
+    # 2. Llistar què ha comprat històricament cada client
+    client_history = ventas.groupby('id_cliente')['id_producto'].unique().to_dict()
+
+    recomanacions = []
+    for _, row in alerts.iterrows():
+        client_id = row['id_cliente']
+        
+        # Mètode segur per extreure l'agrupació sense que doni KeyError
+        cat_alerta = row.get('categoria_h', row.get('familia_h', row.get('familia', 'Sense dades')))
+        
+        # Producte estrella d'aquesta línia
+        top_prod = top_dict.get(cat_alerta, "Sense dades")
+        productes_comprats = client_history.get(client_id, [])
+        
+        if top_prod not in productes_comprats and top_prod != "Sense dades":
+            recomanacions.append(f"Recomanem oferir el producte estrella: SKU {top_prod}")
+        else:
+            recomanacions.append("Client ja disposa del producte estrella d'aquesta línia.")
+            
+    alerts['cross_sell_recommendation'] = recomanacions
+    return alerts
 def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
                  clientes: pd.DataFrame, mapping: pd.DataFrame,
                  as_of: pd.Timestamp) -> pd.DataFrame:
@@ -290,46 +324,47 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
         })
 
     a = pd.DataFrame(rows)
+    a = pd.DataFrame(rows)
     if a.empty:
-        return a
+        # Retornem un DataFrame buit però amb tota l'estructura correcta
+        return pd.DataFrame(columns=[
+            "alert_id", "fecha_alerta", "id_cliente", "provincia",
+            "bloque_analitico", "categoria_h", "familia", "familia_comercial",
+            "tipo_alerta", "motivo", "segment_or_pattern",
+            "prioridad", "score", "expected_impact_eur", "urgency_factor",
+            "canal_recomendado", "contact_window_days", "trace_features"
+        ])
     a["score"] = a["expected_impact_eur"] * a["urgency_factor"]
     a["fecha_alerta"] = as_of.date()
     a = a.merge(clientes[["id_cliente", "provincia"]], on="id_cliente", how="left")
     a = a.sort_values("score", ascending=False).reset_index(drop=True)
     a["alert_id"] = [f"ALT-{as_of.strftime('%Y%m%d')}-{i+1:06d}" for i in range(len(a))]
     return a[[
-        "alert_id", "fecha_alerta", "id_cliente", "provincia",
-        "bloque_analitico", "categoria_h", "familia", "familia_comercial",
-        "tipo_alerta", "motivo", "segment_or_pattern",
-        "prioridad", "score", "expected_impact_eur", "urgency_factor",
-        "canal_recomendado", "contact_window_days", "trace_features",
-    ]]
-
+            "alert_id", "fecha_alerta", "id_cliente", "provincia",
+            "bloque_analitico", "categoria_h", "familia", "familia_comercial",
+            "tipo_alerta", "motivo", "segment_or_pattern",
+            "prioridad", "score", "expected_impact_eur", "urgency_factor",
+            "canal_recomendado", "contact_window_days", "trace_features"
+        ]]
 
 # -------------------- ENTRY POINT --------------------
+# -------------------- ENTRY POINT --------------------
 def generate_alerts(as_of_date, data: dict | None = None) -> pd.DataFrame:
-    """
-    Generate the daily alert table for a given as-of date.
-
-    Parameters
-    ----------
-    as_of_date : str | pd.Timestamp
-        Reference date. Only data on/before this date is used.
-    data : dict, optional
-        Pre-loaded dict from `load_data()`. If None, will load fresh.
-
-    Returns
-    -------
-    pd.DataFrame
-        Sorted alert table (highest score first).
-    """
+    # ... (el codi inicial es manté igual)
     as_of = pd.Timestamp(as_of_date)
     if data is None:
         data = load_data()
     v = filter_commercial_activity(data["ventas"], as_of)
     cs = commodity_segments(v, data["potencial"], as_of)
     tp = technical_patterns(v, as_of)
-    return build_alerts(cs, tp, data["clientes"], data["mapping"], as_of)
+    
+    # Generem les alertes base
+    alerts_df = build_alerts(cs, tp, data["clientes"], data["mapping"], as_of)
+    
+    # --- NOVA LÍNIA: Afegim el Cross-Selling ---
+    alerts_df = generate_cross_sell_recommendations(v, alerts_df)
+    
+    return alerts_df
 
 
 if __name__ == "__main__":

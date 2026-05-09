@@ -25,7 +25,16 @@ def _alerts(date_str: str):
     return generate_alerts(date_str, data=_load())
 
 # ----- Sidebar controls -----
+# ----- Sidebar controls & RLS (Row-Level Security) -----
 st.sidebar.title("⚙️ Controls")
+
+# MOCK DE SEGURETAT PER ROLS
+st.sidebar.markdown("### 👤 Sessió d'Usuari")
+rol_usuari = st.sidebar.selectbox(
+    "Selecciona la teva zona (Rol):", 
+    ["Direcció (Totes les zones)", "Delegació Catalunya", "Delegació Centre", "Delegació Sud"]
+)
+
 data = _load()
 min_date = data["ventas"]["fecha"].min().date()
 max_date = data["ventas"]["fecha"].max().date()
@@ -33,6 +42,14 @@ max_date = data["ventas"]["fecha"].max().date()
 ref = st.sidebar.date_input("Reference date (as-of)",
                             value=max_date, min_value=min_date, max_value=max_date)
 alerts = _alerts(ref.isoformat())
+
+# APLICAR FILTRE DE ROL A LES ALERTES
+if rol_usuari == "Delegació Catalunya":
+    alerts = alerts[alerts['provincia'].isin(["Barcelona", "Tarragona", "Lleida", "Girona"])]
+elif rol_usuari == "Delegació Centre":
+    alerts = alerts[alerts['provincia'].isin(["Madrid", "Toledo", "Segovia", "Guadalajara"])]
+elif rol_usuari == "Delegació Sud":
+    alerts = alerts[alerts['provincia'].isin(["Sevilla", "Málaga", "Cádiz", "Córdoba", "Huelva", "Jaén", "Almería", "Granada"])]
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Filters")
@@ -42,19 +59,20 @@ prio_filter = st.sidebar.multiselect("Prioridad",
 tipo_filter = st.sidebar.multiselect("Tipo de alerta",
                                      options=sorted(alerts["tipo_alerta"].unique()),
                                      default=sorted(alerts["tipo_alerta"].unique()))
-canal_filter = st.sidebar.multiselect("Canal",
-                                      options=sorted(alerts["canal_recomendado"].unique()),
-                                      default=sorted(alerts["canal_recomendado"].unique()))
-bloque_filter = st.sidebar.multiselect("Bloque analítico",
-                                       options=sorted(alerts["bloque_analitico"].unique()),
-                                       default=sorted(alerts["bloque_analitico"].unique()))
 
-f = alerts[
-    alerts["prioridad"].isin(prio_filter)
-    & alerts["tipo_alerta"].isin(tipo_filter)
-    & alerts["canal_recomendado"].isin(canal_filter)
-    & alerts["bloque_analitico"].isin(bloque_filter)
-]
+alerts = alerts[alerts["prioridad"].isin(prio_filter) & alerts["tipo_alerta"].isin(tipo_filter)]
+
+# EXPORTACIÓ ACCIONABLE (CSV Download)
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📥 Exportar Dades")
+csv_data = alerts.to_csv(index=False).encode('utf-8')
+st.sidebar.download_button(
+    label="Descarregar Llistat (CSV)",
+    data=csv_data,
+    file_name=f"smart_signals_{ref}_{rol_usuari.replace(' ', '_')}.csv",
+    mime='text/csv',
+    help="Descarrega les alertes filtrades per importar-les al CRM o Excel."
+)
 
 # ----- Header -----
 st.title("📊 Smart Demand Signals")
