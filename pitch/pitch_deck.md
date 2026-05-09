@@ -163,7 +163,7 @@ Four layers, separated by design — exactly what the brief asks for.
 - Wire alerts into Inibsa's actual CRM via `crm_export.py`
 - Replace mocked outcomes with real recordings from sales team
 - Threshold auto-tuning when ≥500 outcomes recorded
-- Clinic-typology-conditioned expected-demand models
+- Run a 30-day pilot with control group to measure actual lift
 - Map view by provincia / delegado territory
 
 The architecture supports all of this without rewrites.

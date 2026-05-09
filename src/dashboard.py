@@ -14,7 +14,6 @@ import sys; sys.path.insert(0, str(ROOT / "src"))
 from smart_demand_signals import generate_alerts, load_data
 from learning_loop import compute_metrics, recommend_threshold_adjustments
 from crm_export import export_alerts
-from backtest import backtest, summarise, baseline_purchase_rate
 
 st.set_page_config(page_title="Smart Demand Signals", layout="wide", page_icon="📊")
 
@@ -66,7 +65,7 @@ if client_search.strip():
 st.title("📊 Smart Demand Signals")
 st.markdown(f"**Inibsa · Interhack BCN 2026** — Daily alert generator for {ref}")
 
-tab_alerts, tab_learning, tab_backtest = st.tabs(["📋 Alerts", "📈 Learning loop", "🎯 Backtest"])
+tab_alerts, tab_learning = st.tabs(["📋 Alerts", "📈 Learning loop"])
 
 # ====================================================================
 # TAB 1 — Alerts
@@ -117,7 +116,7 @@ with tab_alerts:
 
     table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
                   "prioridad", "score", "expected_impact_eur", "urgency_factor",
-                  "canal_recomendado", "contact_window_days", "clinic_typology", "motivo"]
+                  "canal_recomendado", "contact_window_days", "motivo"]
     display = f.head(top_n)[table_cols].copy()
     display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
     display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
@@ -241,75 +240,6 @@ Threshold recommendations  →  Rule update  →  Better alerts""",
         st.caption("Each outcome adds one row to `analysis/alert_outcomes.csv`. "
                    "The system never silently drops feedback — every recorded outcome "
                    "appears here on next refresh.")
-
-# ====================================================================
-# TAB 3 — Backtest (walk-forward validation)
-# ====================================================================
-with tab_backtest:
-    st.markdown("### Walk-forward backtest")
-    st.caption("Generates alerts at a historical reference date using only data ≤ that date, "
-               "then validates them against actual post-date purchases. No leakage. "
-               "This is **the alert was right**, not **intervention worked** — we cannot "
-               "measure intervention without a control group.")
-
-    @st.cache_data(show_spinner="Running backtest...")
-    def _backtest(date_str):
-        return backtest(date_str, data=_load())
-
-    @st.cache_data
-    def _baseline(date_str, w):
-        return baseline_purchase_rate(date_str, data=_load(), window_days=w)
-
-    bt_date = st.date_input("Reference date for backtest",
-                            value=pd.to_datetime("2025-06-30").date(),
-                            min_value=pd.to_datetime("2022-01-01").date(),
-                            max_value=max_date,
-                            key="bt_date")
-
-    bt_df = _backtest(bt_date.isoformat())
-    if bt_df.empty:
-        st.warning("No alerts at this reference date.")
-    else:
-        sm = summarise(bt_df)
-
-        # Top metrics
-        b1, b2, b3 = st.columns(3)
-        b1.metric("Alerts evaluated", f"{len(bt_df):,}")
-        b2.metric("Reference date", str(bt_date))
-        b3.metric("Baseline (active clients buying in 90d)",
-                  f"{_baseline(bt_date.isoformat(), 90):.1%}")
-
-        st.markdown("---")
-        st.markdown("##### Hit rate per alert type (95% Wilson CI)")
-
-        # Format for display
-        sm_disp = sm.copy()
-        sm_disp["hit_rate"]    = sm_disp["hit_rate"].map(lambda x: f"{x:.1%}")
-        sm_disp["ci95_lower"]  = sm_disp["ci95_lower"].map(lambda x: f"{x:.1%}")
-        sm_disp["ci95_upper"]  = sm_disp["ci95_upper"].map(lambda x: f"{x:.1%}")
-        sm_disp["ci_width"]    = sm_disp["ci_width"].map(lambda x: f"{x:.1%}")
-        st.dataframe(sm_disp, use_container_width=True, hide_index=True)
-
-        st.markdown("##### How to read each row")
-        st.markdown("""
-        - **`silent` / `lost`** — hit means *the silence persisted* (alert was right)
-        - **`churn_risk`** — hit means *volume kept falling* (alert was right)
-        - **`capture_window` / `opportunity_spike`** — hit means *the client did purchase* (alert correctly flagged an active customer)
-
-        A hit rate close to **100%** means the alert is highly predictive of its assumed outcome.
-        Where hit rate is **lower** for `churn_risk` or `silent`, that's *good news* for the business —
-        means more alerts are recoverable than first appears.
-        """)
-
-        st.markdown("---")
-        st.markdown("##### Hit rate by priority")
-        prio_summary = (bt_df[bt_df["hit"].notna()]
-                        .groupby(["tipo_alerta", "prioridad"])
-                        .agg(n=("alert_id", "count"),
-                             hit_rate=("hit", "mean"))
-                        .reset_index())
-        prio_summary["hit_rate"] = prio_summary["hit_rate"].map(lambda x: f"{x:.1%}")
-        st.dataframe(prio_summary, use_container_width=True, hide_index=True)
 
 # ----- Footer -----
 st.markdown("---")

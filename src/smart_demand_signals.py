@@ -491,13 +491,6 @@ def generate_alerts(as_of_date, data: dict | None = None,
                 lambda r: (r["id_cliente"], r["familia"]) in grace_keys, axis=1)
             alerts["post_campaign_grace"] = silent_or_churn & in_grace
             alerts = alerts[~alerts["post_campaign_grace"]].drop(columns=["post_campaign_grace"]).reset_index(drop=True)
-    # Annotate with clinic typology (display only)
-    typo_path = ROOT / "analysis" / "clinic_typology.csv"
-    if typo_path.exists() and not alerts.empty:
-        typo = pd.read_csv(typo_path, dtype={"id_cliente": str},
-                           usecols=["id_cliente", "clinic_typology"])
-        alerts = alerts.merge(typo, on="id_cliente", how="left")
-        alerts["clinic_typology"] = alerts["clinic_typology"].fillna("unknown")
     return alerts
 
 

@@ -42,7 +42,6 @@ def emit_hubspot_task(alert: dict) -> dict:
             "inibsa_expected_impact_eur":  float(alert["expected_impact_eur"]),
             "inibsa_familia":              alert["familia"],
             "inibsa_canal":                alert["canal_recomendado"],
-            "inibsa_clinic_typology":      alert.get("clinic_typology", ""),
             "inibsa_campaign_active":      bool(alert.get("campaign_active", False)),
             "inibsa_trace_features":       alert["trace_features"],
         },
