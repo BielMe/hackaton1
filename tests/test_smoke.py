@@ -146,6 +146,25 @@ def test_crm_export_hubspot_shape():
         assert "inibsa_alert_id" in p["properties"]
 
 
+def test_backtest_runs_and_returns_hits():
+    from backtest import backtest, summarise, wilson_ci
+    bt = backtest("2024-12-31", data=_get_data())
+    assert "hit" in bt.columns
+    assert len(bt) > 0
+    sm = summarise(bt)
+    assert "hit_rate" in sm.columns
+    assert (sm["hit_rate"] >= 0).all() and (sm["hit_rate"] <= 1).all()
+    assert (sm["ci95_lower"] <= sm["hit_rate"]).all()
+    assert (sm["ci95_upper"] >= sm["hit_rate"]).all()
+
+
+def test_wilson_ci_edge_cases():
+    from backtest import wilson_ci
+    assert wilson_ci(0, 0) == (0.0, 0.0)
+    lo, hi = wilson_ci(50, 100)
+    assert 0.4 < lo < 0.5 < hi < 0.6  # 50% with reasonable width
+
+
 if __name__ == "__main__":
     fns = [v for k, v in list(globals().items()) if k.startswith("test_")]
     failed = []
