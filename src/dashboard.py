@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 import sys; sys.path.insert(0, str(ROOT / "src"))
 from smart_demand_signals import generate_alerts, load_data
 from learning_loop import compute_metrics, recommend_threshold_adjustments
+from crm_export import export_alerts
 
 st.set_page_config(page_title="Smart Demand Signals", layout="wide", page_icon="📊")
 
@@ -49,6 +50,7 @@ canal_filter = st.sidebar.multiselect("Canal",
 bloque_filter = st.sidebar.multiselect("Bloque analítico",
                                        options=sorted(alerts["bloque_analitico"].unique()),
                                        default=sorted(alerts["bloque_analitico"].unique()))
+client_search = st.sidebar.text_input("🔍 Cliente search (id_cliente)", value="")
 
 f = alerts[
     alerts["prioridad"].isin(prio_filter)
@@ -56,6 +58,8 @@ f = alerts[
     & alerts["canal_recomendado"].isin(canal_filter)
     & alerts["bloque_analitico"].isin(bloque_filter)
 ]
+if client_search.strip():
+    f = f[f["id_cliente"].str.contains(client_search.strip(), case=False, na=False)]
 
 # ----- Header -----
 st.title("📊 Smart Demand Signals")
@@ -67,6 +71,13 @@ tab_alerts, tab_learning = st.tabs(["📋 Alerts", "📈 Learning loop"])
 # TAB 1 — Alerts
 # ====================================================================
 with tab_alerts:
+    # Campaign banner if as-of date falls in a campaign window
+    if not alerts.empty and bool(alerts["campaign_active"].iloc[0]):
+        cname = alerts["campaign_name"].iloc[0]
+        st.info(f"🎯 **Campaign window active: `{cname}`** — alerts firing during a campaign "
+                f"may include campaign-driven volume noise. Treat anomaly_high signals "
+                f"with extra scrutiny.", icon="🎯")
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total alerts", f"{len(f):,}", delta=f"of {len(alerts):,} unfiltered")
     c2.metric("High priority", f"{(f['prioridad']=='High').sum():,}")
@@ -86,17 +97,43 @@ with tab_alerts:
         cross = pd.crosstab(f["canal_recomendado"], f["prioridad"])
         st.bar_chart(cross)
 
+    # Province distribution
+    if len(f):
+        st.markdown("##### Alerts by provincia (top 15)")
+        prov_counts = f["provincia"].value_counts().head(15).reset_index()
+        prov_counts.columns = ["provincia", "n_alerts"]
+        st.bar_chart(prov_counts, x="provincia", y="n_alerts")
+
     st.markdown("### Top alerts (sorted by score)")
     top_n = st.slider("How many to show", min_value=10, max_value=200, value=25, step=5)
 
     table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
                   "prioridad", "score", "expected_impact_eur", "urgency_factor",
-                  "canal_recomendado", "contact_window_days", "motivo"]
+                  "canal_recomendado", "contact_window_days", "clinic_typology", "motivo"]
     display = f.head(top_n)[table_cols].copy()
     display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
     display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
     display["urgency_factor"] = display["urgency_factor"].map(lambda x: f"{x:.2f}")
     st.dataframe(display, use_container_width=True, hide_index=True)
+
+    # Export buttons
+    if len(f):
+        ex_col1, ex_col2 = st.columns(2)
+        with ex_col1:
+            st.download_button(
+                "⬇️ Download filtered alerts (CSV)",
+                data=f.to_csv(index=False).encode("utf-8"),
+                file_name=f"alerts_{ref}.csv",
+                mime="text/csv",
+            )
+        with ex_col2:
+            payloads = export_alerts(f.head(top_n), target="hubspot")
+            st.download_button(
+                "⬇️ Export top-N as HubSpot Tasks (JSON)",
+                data=json.dumps(payloads, indent=2, ensure_ascii=False).encode("utf-8"),
+                file_name=f"alerts_hubspot_{ref}.json",
+                mime="application/json",
+            )
 
     st.markdown("### 🔍 Drill into a single alert")
     selected_id = st.selectbox("Pick an alert_id", options=f["alert_id"].head(top_n).tolist())
@@ -124,8 +161,16 @@ with tab_alerts:
 # ====================================================================
 with tab_learning:
     st.markdown("### Outcome-driven feedback loop")
-    st.caption("Reads `analysis/alert_outcomes.csv` (mocked for demo) and shows how the "
-               "system is actually performing in the field.")
+
+    st.warning(
+        "⚠️ **Demo data — not real outcomes.** The 120 rows in "
+        "`analysis/alert_outcomes.csv` are a calibrated simulation built to "
+        "demonstrate the feedback loop. In production, outcomes would be fed "
+        "by CRM webhooks (HubSpot / Salesforce), sales-team workflow tools, or "
+        "a manual logging form. The schema, module, and dashboard are real; "
+        "only the rows are illustrative.",
+        icon="⚠️",
+    )
 
     metrics = compute_metrics()
 

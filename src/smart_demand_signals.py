@@ -35,7 +35,20 @@ def load_data() -> dict[str, pd.DataFrame]:
         "clientes": pd.read_csv(CSV_DIR / "Clientes.csv",
                                 dtype={"id_cliente": str, "codigo_postal": str}),
         "mapping": pd.read_csv(CSV_DIR / "Mapping_familia.csv"),
+        "campanas": pd.read_csv(CSV_DIR / "Campañas.csv",
+                                parse_dates=["fecha_inicio", "fecha_fin"]),
     }
+
+
+def in_campaign_window(date: pd.Timestamp, campanas: pd.DataFrame,
+                       buffer_days: int = 14) -> tuple[bool, str | None]:
+    """Return (True, name) if date is within ±buffer_days of any campaign window."""
+    for _, c in campanas.iterrows():
+        start = c["fecha_inicio"] - pd.Timedelta(days=buffer_days)
+        end = c["fecha_fin"] + pd.Timedelta(days=buffer_days)
+        if start <= date <= end:
+            return True, c["campana"]
+    return False, None
 
 
 def filter_commercial_activity(ventas: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
@@ -312,8 +325,41 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
     ]]
 
 
+# -------------------- SNOOZE / DEDUP --------------------
+def snooze_recently_actioned(alerts: pd.DataFrame, as_of: pd.Timestamp,
+                              snooze_days: int = 30) -> pd.DataFrame:
+    """
+    Suppress alerts whose (id_cliente, familia, tipo_alerta) was acted on
+    within the last `snooze_days` and produced a terminal outcome
+    (won / lost / false_positive).
+
+    A `pending` or `no_contact` outcome is NOT terminal — those keep firing.
+    """
+    outcomes_path = ROOT / "analysis" / "alert_outcomes.csv"
+    alerts_csv    = ROOT / "analysis" / "alerts.csv"
+    if not outcomes_path.exists() or not alerts_csv.exists():
+        return alerts
+    o = pd.read_csv(outcomes_path, parse_dates=["recorded_at"])
+    if o.empty:
+        return alerts
+    a_hist = pd.read_csv(alerts_csv,
+                         dtype={"id_cliente": str},
+                         usecols=["alert_id", "id_cliente", "familia", "tipo_alerta"])
+    o = o.merge(a_hist, on="alert_id", how="left")
+    cutoff = as_of - pd.Timedelta(days=snooze_days)
+    snoozed = o[(o["outcome_status"].isin(["won", "lost", "false_positive"]))
+                & (o["recorded_at"] >= cutoff)][["id_cliente", "familia", "tipo_alerta"]]
+    if snoozed.empty:
+        return alerts
+    snoozed_keys = set(zip(snoozed["id_cliente"], snoozed["familia"], snoozed["tipo_alerta"]))
+    keep_mask = ~alerts.apply(
+        lambda r: (r["id_cliente"], r["familia"], r["tipo_alerta"]) in snoozed_keys, axis=1)
+    return alerts[keep_mask].reset_index(drop=True)
+
+
 # -------------------- ENTRY POINT --------------------
-def generate_alerts(as_of_date, data: dict | None = None) -> pd.DataFrame:
+def generate_alerts(as_of_date, data: dict | None = None,
+                    apply_snooze: bool = True, snooze_days: int = 30) -> pd.DataFrame:
     """
     Generate the daily alert table for a given as-of date.
 
@@ -323,6 +369,11 @@ def generate_alerts(as_of_date, data: dict | None = None) -> pd.DataFrame:
         Reference date. Only data on/before this date is used.
     data : dict, optional
         Pre-loaded dict from `load_data()`. If None, will load fresh.
+    apply_snooze : bool, default True
+        If True, suppress alerts whose (cliente × familia × tipo) had a
+        terminal outcome within the last `snooze_days`.
+    snooze_days : int, default 30
+        Snooze window size.
 
     Returns
     -------
@@ -335,7 +386,22 @@ def generate_alerts(as_of_date, data: dict | None = None) -> pd.DataFrame:
     v = filter_commercial_activity(data["ventas"], as_of)
     cs = commodity_segments(v, data["potencial"], as_of)
     tp = technical_patterns(v, as_of)
-    return build_alerts(cs, tp, data["clientes"], data["mapping"], as_of)
+    alerts = build_alerts(cs, tp, data["clientes"], data["mapping"], as_of)
+    if apply_snooze and not alerts.empty:
+        alerts = snooze_recently_actioned(alerts, as_of, snooze_days)
+    # Annotate with campaign context
+    if "campanas" in data and not alerts.empty:
+        in_window, name = in_campaign_window(as_of, data["campanas"])
+        alerts["campaign_active"] = in_window
+        alerts["campaign_name"] = name if in_window else ""
+    # Annotate with clinic typology (display only)
+    typo_path = ROOT / "analysis" / "clinic_typology.csv"
+    if typo_path.exists() and not alerts.empty:
+        typo = pd.read_csv(typo_path, dtype={"id_cliente": str},
+                           usecols=["id_cliente", "clinic_typology"])
+        alerts = alerts.merge(typo, on="id_cliente", how="left")
+        alerts["clinic_typology"] = alerts["clinic_typology"].fillna("unknown")
+    return alerts
 
 
 if __name__ == "__main__":
