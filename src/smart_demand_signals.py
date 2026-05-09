@@ -44,11 +44,61 @@ def in_campaign_window(date: pd.Timestamp, campanas: pd.DataFrame,
                        buffer_days: int = 14) -> tuple[bool, str | None]:
     """Return (True, name) if date is within ±buffer_days of any campaign window."""
     for _, c in campanas.iterrows():
-        start = c["fecha_inicio"] - pd.Timedelta(days=buffer_days)
-        end = c["fecha_fin"] + pd.Timedelta(days=buffer_days)
+        start = pd.Timestamp(c["fecha_inicio"]) - pd.Timedelta(days=buffer_days)
+        end = pd.Timestamp(c["fecha_fin"]) + pd.Timedelta(days=buffer_days)
         if start <= date <= end:
             return True, c["campana"]
     return False, None
+
+
+def post_campaign_grace_keys(ventas: pd.DataFrame, campanas: pd.DataFrame,
+                             as_of: pd.Timestamp,
+                             heavy_multiplier: float = 2.0,
+                             window_buffer_days: int = 14) -> set:
+    """
+    Identify (id_cliente, familia_h) pairs that are in a post-campaign grace
+    period — i.e. they bought significantly above their normal pace during a
+    recent campaign window, so silence is expected (warehouse is full).
+
+    Returns a set of (id_cliente, familia_h) tuples to be suppressed.
+    """
+    sales = ventas[(ventas["unidades"] > 0)
+                   & ventas["familia_h"].notna()].copy()
+    sales["fecha"] = pd.to_datetime(sales["fecha"])
+    if sales.empty or campanas.empty:
+        return set()
+
+    # Average monthly burn per (cliente, familia_h) over full history
+    sales["ym"] = sales["fecha"].dt.to_period("M")
+    monthly = (sales.groupby(["id_cliente", "familia_h", "ym"])
+                    ["valores_h"].sum().reset_index())
+    burn = (monthly.groupby(["id_cliente", "familia_h"])
+                    ["valores_h"].mean().reset_index()
+                    .rename(columns={"valores_h": "monthly_avg"}))
+
+    # For each campaign, sum what each (cliente, familia_h) bought in the window
+    grace_keys: set = set()
+    for _, c in campanas.iterrows():
+        start = pd.Timestamp(c["fecha_inicio"]) - pd.Timedelta(days=window_buffer_days)
+        end = pd.Timestamp(c["fecha_fin"]) + pd.Timedelta(days=window_buffer_days)
+        if end > as_of:
+            continue  # future campaign
+        window_sales = sales[(sales["fecha"] >= start) & (sales["fecha"] <= end)]
+        if window_sales.empty:
+            continue
+        agg = (window_sales.groupby(["id_cliente", "familia_h"])
+                          ["valores_h"].sum().reset_index()
+                          .rename(columns={"valores_h": "vol_in_window"}))
+        agg = agg.merge(burn, on=["id_cliente", "familia_h"], how="left")
+        agg["grace_months"] = agg["vol_in_window"] / agg["monthly_avg"].clip(lower=1e-6)
+        # Only "heavy" purchases (>= heavy_multiplier × monthly avg) get grace
+        heavy = agg[agg["grace_months"] >= heavy_multiplier].copy()
+        # Grace ends at end + grace_months (relative to end of campaign window)
+        for _, r in heavy.iterrows():
+            grace_end = end + pd.Timedelta(days=int(r["grace_months"] * 30))
+            if as_of <= grace_end:
+                grace_keys.add((r["id_cliente"], r["familia_h"]))
+    return grace_keys
 
 
 def filter_commercial_activity(ventas: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
@@ -104,7 +154,10 @@ def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
 
     def label(r):
         pot, curr, base = r["potencial_h"], r["volume_eur_current"], r["volume_eur_baseline"]
+        rec = r["recency_days"] if pd.notna(r["recency_days"]) else 9999
         s = r["share_of_potential"]
+        # >9 months silent AND no current activity = likely lost (low priority recovery)
+        if rec > 270 and curr <= 0: return "lost"
         if base > 0 and curr <= 0: return "churn_risk_silent"
         if base > 0 and curr < 0.5 * base: return "churn_risk_dropping"
         if pot is None or pd.isna(pot) or pot == 0: return "unknown_potential"
@@ -117,7 +170,9 @@ def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
 
 
 def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
-    """Per (cliente × familia_h) for technical products. Individual-baseline rule."""
+    """Per (cliente × familia_h) for technical products. Individual-baseline rule
+    with YoY comparison to neutralise seasonality."""
+    from seasonality import yoy_baseline, is_holiday_period
     d90 = as_of - pd.Timedelta(days=90)
     d365 = as_of - pd.Timedelta(days=365)
     tech = v[v["bloque_analitico"] == "Productos Técnicos"].copy()
@@ -151,13 +206,23 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
                .agg(frequency_baseline=("fecha_d", "nunique"),
                     volume_baseline=("valores_h", "sum"))
                .reset_index())
+    yoy = yoy_baseline(sales, as_of, window_days=90)
     df = (lt.merge(wr, on=["id_cliente", "familia_h"], how="left")
             .merge(wb, on=["id_cliente", "familia_h"], how="left")
+            .merge(yoy, on=["id_cliente", "familia_h"], how="left")
             .fillna({"frequency_recent": 0, "volume_recent": 0,
-                     "frequency_baseline": 0, "volume_baseline": 0}))
+                     "frequency_baseline": 0, "volume_baseline": 0,
+                     "frequency_yoy": 0, "volume_yoy": 0}))
 
+    # Default expected = 90/275 of trailing baseline; if YoY data exists, prefer that
+    # (same-calendar window last year) — neutralises seasonality, esp. August.
     df["expected_freq_recent"] = df["frequency_baseline"] * (90 / 275)
-    df["expected_vol_recent"] = df["volume_baseline"] * (90 / 275)
+    df["expected_vol_recent"]  = df["volume_baseline"] * (90 / 275)
+    yoy_mask = df["volume_yoy"] > 0
+    df.loc[yoy_mask, "expected_freq_recent"] = df.loc[yoy_mask, "frequency_yoy"]
+    df.loc[yoy_mask, "expected_vol_recent"]  = df.loc[yoy_mask, "volume_yoy"]
+    df["baseline_source"] = yoy_mask.map({True: "yoy", False: "trailing"})
+
     df["freq_drop_ratio"] = df.apply(
         lambda r: r["frequency_recent"] / r["expected_freq_recent"]
         if r["expected_freq_recent"] > 0 else None, axis=1)
@@ -165,15 +230,25 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
         lambda r: r["volume_recent"] / r["expected_vol_recent"]
         if r["expected_vol_recent"] > 0 else None, axis=1)
 
-    df["signal_absent"] = df["frequency_recent"] == 0
-    df["signal_drop_freq"] = df["expected_freq_recent"].gt(0) & (df["freq_drop_ratio"].fillna(1) < 0.5)
-    df["signal_drop_volume"] = df["expected_vol_recent"].gt(0) & (df["vol_drop_ratio"].fillna(1) < 0.5)
+    df["signal_absent"]       = df["frequency_recent"] == 0
+    df["signal_drop_freq"]    = df["expected_freq_recent"].gt(0) & (df["freq_drop_ratio"].fillna(1) < 0.5)
+    df["signal_drop_volume"]  = df["expected_vol_recent"].gt(0) & (df["vol_drop_ratio"].fillna(1) < 0.5)
     df["signal_anomaly_high"] = df["expected_vol_recent"].gt(0) & (df["vol_drop_ratio"].fillna(0) > 2.0)
+
+    # Holiday-aware suppression: if as_of is in a holiday window AND the YoY drop
+    # isn't severe (>0.5×), don't fire absent/drop signals — likely seasonal pause.
+    holiday = is_holiday_period(as_of)
+    if holiday:
+        seasonal_mask = (df["volume_yoy"] > 0) & (df["vol_drop_ratio"].fillna(1) >= 0.5)
+        df.loc[seasonal_mask, "signal_absent"]      = False
+        df.loc[seasonal_mask, "signal_drop_freq"]   = False
+        df.loc[seasonal_mask, "signal_drop_volume"] = False
+    df["holiday_period"] = holiday
 
     def pattern(r):
         if r["purchase_days_total"] < 3: return "insufficient_history"
-        sys = pd.notna(r["mean_interpurchase_days"]) and r["mean_interpurchase_days"] <= 90
-        if sys:
+        sys_pat = pd.notna(r["mean_interpurchase_days"]) and r["mean_interpurchase_days"] <= 90
+        if sys_pat:
             if r["signal_absent"]: return "systematic_silent"
             if r["signal_drop_freq"] or r["signal_drop_volume"]: return "systematic_deterioration"
             if r["signal_anomaly_high"]: return "systematic_spike"
@@ -190,7 +265,15 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
 # -------------------- ACTIVATION LAYER --------------------
 def _commodity_alert(r):
     seg = r["segment"]
-    if seg == "promiscuous":
+    if seg == "lost":
+        rec = r["recency_days"] if pd.notna(r["recency_days"]) else 365
+        impact = max(0.0, r["volume_eur_baseline"]) * 0.3   # discounted — recovery is hard
+        urg = 0.2  # low urgency
+        tipo = "lost"
+        motivo = f"Cliente perdido (>{int(rec)}d sin compra): campaña de recuperación"
+        prio = "Low"
+        canal, win = "televenta", 90
+    elif seg == "promiscuous":
         impact = max(0.0, (r["potencial_h"] or 0) - r["volume_eur_current"])
         urg, tipo = 0.7, "capture_window"
         motivo = (f"Cliente promiscuo: capturado {r['share_of_potential']:.0%} del potencial; "
@@ -260,7 +343,7 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
     rows = []
 
     for _, r in comm_seg[comm_seg["segment"].isin(
-            ["promiscuous", "churn_risk_silent", "churn_risk_dropping"])].iterrows():
+            ["promiscuous", "churn_risk_silent", "churn_risk_dropping", "lost"])].iterrows():
         tipo, motivo, prio, impact, urg, canal, win = _commodity_alert(r)
         rows.append({
             "id_cliente": r["id_cliente"],
@@ -389,11 +472,25 @@ def generate_alerts(as_of_date, data: dict | None = None,
     alerts = build_alerts(cs, tp, data["clientes"], data["mapping"], as_of)
     if apply_snooze and not alerts.empty:
         alerts = snooze_recently_actioned(alerts, as_of, snooze_days)
+    # Annotate with seasonality / holiday flag
+    from seasonality import is_holiday_period
+    if not alerts.empty:
+        alerts["holiday_period"] = is_holiday_period(as_of)
     # Annotate with campaign context
     if "campanas" in data and not alerts.empty:
         in_window, name = in_campaign_window(as_of, data["campanas"])
         alerts["campaign_active"] = in_window
         alerts["campaign_name"] = name if in_window else ""
+
+        # Post-campaign grace: suppress silent / churn alerts for clients still
+        # in their inventory window from a heavy campaign-window purchase
+        grace_keys = post_campaign_grace_keys(v, data["campanas"], as_of)
+        if grace_keys:
+            silent_or_churn = alerts["tipo_alerta"].isin(["silent", "churn_risk"])
+            in_grace = alerts.apply(
+                lambda r: (r["id_cliente"], r["familia"]) in grace_keys, axis=1)
+            alerts["post_campaign_grace"] = silent_or_churn & in_grace
+            alerts = alerts[~alerts["post_campaign_grace"]].drop(columns=["post_campaign_grace"]).reset_index(drop=True)
     # Annotate with clinic typology (display only)
     typo_path = ROOT / "analysis" / "clinic_typology.csv"
     if typo_path.exists() and not alerts.empty:

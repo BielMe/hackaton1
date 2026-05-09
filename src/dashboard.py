@@ -78,6 +78,13 @@ with tab_alerts:
                 f"may include campaign-driven volume noise. Treat anomaly_high signals "
                 f"with extra scrutiny.", icon="🎯")
 
+    # Holiday banner — explains why some drop signals were suppressed
+    if not alerts.empty and bool(alerts["holiday_period"].iloc[0]):
+        st.info(f"🏖️ **Holiday period active** (August / Christmas week / Reyes) — "
+                f"technical-product drops are suppressed unless YoY comparison also "
+                f"shows a >50% decline. Avoids treating seasonal pauses as churn.",
+                icon="🏖️")
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total alerts", f"{len(f):,}", delta=f"of {len(alerts):,} unfiltered")
     c2.metric("High priority", f"{(f['prioridad']=='High').sum():,}")

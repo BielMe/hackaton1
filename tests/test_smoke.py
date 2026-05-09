@@ -50,8 +50,38 @@ def test_alerts_sorted_by_score_desc():
 
 def test_tipo_alerta_uses_known_vocabulary():
     a = generate_alerts("2025-12-29", data=_get_data())
-    valid = {"capture_window", "silent", "churn_risk", "opportunity_spike"}
+    valid = {"capture_window", "silent", "churn_risk", "opportunity_spike", "lost"}
     assert set(a["tipo_alerta"].unique()).issubset(valid)
+
+
+def test_lost_segment_is_separated_from_churn():
+    a = generate_alerts("2025-12-29", data=_get_data())
+    lost = a[a["tipo_alerta"] == "lost"]
+    silent = a[a["tipo_alerta"] == "silent"]
+    if len(lost):
+        # Lost should be lower priority than active silent alerts
+        assert (lost["prioridad"] == "Low").all()
+
+
+def test_holiday_flag_present():
+    a = generate_alerts("2025-08-15", data=_get_data())
+    assert "holiday_period" in a.columns
+    assert bool(a["holiday_period"].iloc[0])  # August → holiday
+    a = generate_alerts("2025-04-15", data=_get_data())
+    assert not bool(a["holiday_period"].iloc[0])  # April → not holiday
+
+
+def test_yoy_baseline_used_when_available():
+    """At least some technical pairs should use YoY baseline by 2025-12-29."""
+    import sys, json
+    sys.path.insert(0, str(ROOT / "src"))
+    from smart_demand_signals import (
+        load_data, filter_commercial_activity, technical_patterns)
+    data = _get_data()
+    v = filter_commercial_activity(data["ventas"], pd.Timestamp("2025-12-29"))
+    tp = technical_patterns(v, pd.Timestamp("2025-12-29"))
+    assert "baseline_source" in tp.columns
+    assert (tp["baseline_source"] == "yoy").sum() > 0
 
 
 def test_canal_routing():
