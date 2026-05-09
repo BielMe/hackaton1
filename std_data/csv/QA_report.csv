@@ -1,0 +1,7 @@
+sheet,rows,unique_clients,note
+Potencial,33093,11031,"5,209 rows still have potencial_h=0 (briefing-documented data quality)"
+Clientes,10994,10994,30 duplicate rows + 7 postal conflicts resolved
+Productos,25,0,"8 commodities + 17 technical, 25 SKUs total"
+Ventas,161584,8095,962 vacio rows dropped; 611 rows from 34 unregistered clients flagged
+Campañas,10,0,10 campaign windows 2021-11-24 → 2025-11-28
+Mapping_familia,3,0,Bridge between Spanish family names and coded categoria_h
