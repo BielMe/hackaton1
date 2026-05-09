@@ -71,6 +71,12 @@ def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
     agg.columns = ["_".join(map(str, c)).rstrip("_") if isinstance(c, tuple) and c[1]
                    else (c[0] if isinstance(c, tuple) else c) for c in agg.columns]
 
+    # Guarantee both period columns exist even when one window is empty (early dates)
+    for col in ["volume_eur_current", "volume_eur_baseline",
+                "frequency_current", "frequency_baseline"]:
+        if col not in agg.columns:
+            agg[col] = 0
+
     rec = (com.groupby(["id_cliente", "categoria_h"])["fecha"].max()
               .reset_index().rename(columns={"fecha": "last_purchase"}))
     rec["recency_days"] = (as_of - rec["last_purchase"]).dt.days
