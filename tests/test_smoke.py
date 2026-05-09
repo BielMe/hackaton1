@@ -37,10 +37,26 @@ def test_alert_id_is_unique_per_day():
     assert a["alert_id"].is_unique
 
 
-def test_score_equals_impact_times_urgency():
+def test_score_equals_impact_times_urgency_times_conv_prob():
     a = generate_alerts("2025-12-29", data=_get_data())
-    s = (a["expected_impact_eur"] * a["urgency_factor"]).round(6)
+    s = (a["expected_impact_eur"] * a["urgency_factor"]
+         * a["conversion_probability"]).round(6)
     assert (a["score"].round(6) == s).all()
+
+
+def test_conversion_probability_in_range():
+    a = generate_alerts("2025-12-29", data=_get_data())
+    assert "conversion_probability" in a.columns
+    assert (a["conversion_probability"] >= 0).all()
+    assert (a["conversion_probability"] <= 1).all()
+
+
+def test_loyalty_tier_and_trend_columns():
+    a = generate_alerts("2025-12-29", data=_get_data())
+    assert "loyalty_tier" in a.columns
+    assert "trend" in a.columns
+    valid_trend = {"improving", "declining", "stable", "new", "inactive", ""}
+    assert set(a["trend"].unique()).issubset(valid_trend)
 
 
 def test_alerts_sorted_by_score_desc():
