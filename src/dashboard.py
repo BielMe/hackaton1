@@ -12,6 +12,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parents[1]
 import sys; sys.path.insert(0, str(ROOT / "src"))
 from smart_demand_signals import generate_alerts, load_data
+from learning_loop import compute_metrics, recommend_threshold_adjustments
 
 st.set_page_config(page_title="Smart Demand Signals", layout="wide", page_icon="📊")
 
@@ -35,7 +36,7 @@ ref = st.sidebar.date_input("Reference date (as-of)",
 alerts = _alerts(ref.isoformat())
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Filters")
+st.sidebar.markdown("### Filters (Alerts tab)")
 prio_filter = st.sidebar.multiselect("Prioridad",
                                      options=sorted(alerts["prioridad"].unique()),
                                      default=["High", "Medium"])
@@ -60,65 +61,137 @@ f = alerts[
 st.title("📊 Smart Demand Signals")
 st.markdown(f"**Inibsa · Interhack BCN 2026** — Daily alert generator for {ref}")
 
-# ----- Metric cards -----
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total alerts", f"{len(f):,}", delta=f"of {len(alerts):,} unfiltered")
-c2.metric("High priority", f"{(f['prioridad']=='High').sum():,}")
-c3.metric("Expected impact", f"€{f['expected_impact_eur'].sum():,.0f}")
-c4.metric("Top alert score", f"{f['score'].max():,.0f}" if len(f) else "—")
+tab_alerts, tab_learning = st.tabs(["📋 Alerts", "📈 Learning loop"])
 
-st.markdown("---")
+# ====================================================================
+# TAB 1 — Alerts
+# ====================================================================
+with tab_alerts:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total alerts", f"{len(f):,}", delta=f"of {len(alerts):,} unfiltered")
+    c2.metric("High priority", f"{(f['prioridad']=='High').sum():,}")
+    c3.metric("Expected impact", f"€{f['expected_impact_eur'].sum():,.0f}")
+    c4.metric("Top alert score", f"{f['score'].max():,.0f}" if len(f) else "—")
 
-# ----- Distribution charts -----
-col_a, col_b = st.columns(2)
-with col_a:
-    st.markdown("##### By tipo de alerta")
-    chart_data = f["tipo_alerta"].value_counts().reset_index()
-    chart_data.columns = ["tipo_alerta", "count"]
-    st.bar_chart(chart_data, x="tipo_alerta", y="count")
-with col_b:
-    st.markdown("##### By canal × prioridad")
-    cross = pd.crosstab(f["canal_recomendado"], f["prioridad"])
-    st.bar_chart(cross)
+    st.markdown("---")
 
-# ----- Top alerts table -----
-st.markdown("### Top alerts (sorted by score)")
-top_n = st.slider("How many to show", min_value=10, max_value=200, value=25, step=5)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### By tipo de alerta")
+        chart_data = f["tipo_alerta"].value_counts().reset_index()
+        chart_data.columns = ["tipo_alerta", "count"]
+        st.bar_chart(chart_data, x="tipo_alerta", y="count")
+    with col_b:
+        st.markdown("##### By canal × prioridad")
+        cross = pd.crosstab(f["canal_recomendado"], f["prioridad"])
+        st.bar_chart(cross)
 
-table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
-              "prioridad", "score", "expected_impact_eur", "urgency_factor",
-              "canal_recomendado", "contact_window_days", "motivo"]
-display = f.head(top_n)[table_cols].copy()
-display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
-display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
-display["urgency_factor"] = display["urgency_factor"].map(lambda x: f"{x:.2f}")
-st.dataframe(display, use_container_width=True, hide_index=True)
+    st.markdown("### Top alerts (sorted by score)")
+    top_n = st.slider("How many to show", min_value=10, max_value=200, value=25, step=5)
 
-# ----- Drill-in -----
-st.markdown("### 🔍 Drill into a single alert")
-selected_id = st.selectbox("Pick an alert_id", options=f["alert_id"].head(top_n).tolist())
-if selected_id:
-    row = f[f["alert_id"] == selected_id].iloc[0]
-    cc1, cc2 = st.columns([2, 1])
-    with cc1:
-        st.markdown(f"**Cliente:** `{row['id_cliente']}`  ·  **Provincia:** {row['provincia']}")
-        st.markdown(f"**Familia:** {row['familia']} ({row['familia_comercial']}) · "
-                    f"**Bloque:** {row['bloque_analitico']}")
-        st.markdown(f"**Tipo:** `{row['tipo_alerta']}` · **Prioridad:** `{row['prioridad']}` · "
-                    f"**Canal:** `{row['canal_recomendado']}`")
-        st.markdown(f"**Motivo:** {row['motivo']}")
-        st.markdown(f"**Ventana de contacto:** {row['contact_window_days']} días")
-    with cc2:
-        st.metric("Score", f"{row['score']:,.0f}")
-        st.metric("Impact (€)", f"€{row['expected_impact_eur']:,.0f}")
-        st.metric("Urgency", f"{row['urgency_factor']:.2f}")
-    st.markdown("**🧩 Trace features (why this alert fired):**")
-    trace = json.loads(row["trace_features"])
-    st.json(trace)
+    table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
+                  "prioridad", "score", "expected_impact_eur", "urgency_factor",
+                  "canal_recomendado", "contact_window_days", "motivo"]
+    display = f.head(top_n)[table_cols].copy()
+    display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
+    display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
+    display["urgency_factor"] = display["urgency_factor"].map(lambda x: f"{x:.2f}")
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.markdown("### 🔍 Drill into a single alert")
+    selected_id = st.selectbox("Pick an alert_id", options=f["alert_id"].head(top_n).tolist())
+    if selected_id:
+        row = f[f["alert_id"] == selected_id].iloc[0]
+        cc1, cc2 = st.columns([2, 1])
+        with cc1:
+            st.markdown(f"**Cliente:** `{row['id_cliente']}`  ·  **Provincia:** {row['provincia']}")
+            st.markdown(f"**Familia:** {row['familia']} ({row['familia_comercial']}) · "
+                        f"**Bloque:** {row['bloque_analitico']}")
+            st.markdown(f"**Tipo:** `{row['tipo_alerta']}` · **Prioridad:** `{row['prioridad']}` · "
+                        f"**Canal:** `{row['canal_recomendado']}`")
+            st.markdown(f"**Motivo:** {row['motivo']}")
+            st.markdown(f"**Ventana de contacto:** {row['contact_window_days']} días")
+        with cc2:
+            st.metric("Score", f"{row['score']:,.0f}")
+            st.metric("Impact (€)", f"€{row['expected_impact_eur']:,.0f}")
+            st.metric("Urgency", f"{row['urgency_factor']:.2f}")
+        st.markdown("**🧩 Trace features (why this alert fired):**")
+        trace = json.loads(row["trace_features"])
+        st.json(trace)
+
+# ====================================================================
+# TAB 2 — Learning loop
+# ====================================================================
+with tab_learning:
+    st.markdown("### Outcome-driven feedback loop")
+    st.caption("Reads `analysis/alert_outcomes.csv` (mocked for demo) and shows how the "
+               "system is actually performing in the field.")
+
+    metrics = compute_metrics()
+
+    if metrics.get("empty"):
+        st.info("No outcomes recorded yet — collect feedback to enable this view.")
+    else:
+        h = metrics["headline"]
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Outcomes recorded", f"{h['n_outcomes_total']:,}",
+                  delta=f"of {h['n_alerts_total']:,} alerts")
+        m2.metric("Conversion rate", f"{h['overall_conversion']:.1%}")
+        m3.metric("False-positive rate", f"{h['false_positive_rate']:.1%}")
+        m4.metric("Revenue captured", f"€{h['revenue_captured_eur']:,.0f}")
+
+        st.markdown("---")
+        st.markdown("##### Conversion by alert type")
+        bt = metrics["by_tipo"][[
+            "tipo_alerta", "n_outcomes", "n_won",
+            "conversion_rate", "false_positive_rate",
+            "revenue_captured_eur", "avg_revenue_per_won"
+        ]].copy()
+        bt["conversion_rate"]      = bt["conversion_rate"].map(lambda x: f"{x:.1%}")
+        bt["false_positive_rate"]  = bt["false_positive_rate"].map(lambda x: f"{x:.1%}")
+        bt["revenue_captured_eur"] = bt["revenue_captured_eur"].map(lambda x: f"€{x:,.0f}")
+        bt["avg_revenue_per_won"]  = bt["avg_revenue_per_won"].map(
+            lambda x: f"€{x:,.0f}" if pd.notna(x) else "—")
+        st.dataframe(bt, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        ll, rr = st.columns(2)
+        with ll:
+            st.markdown("##### Effectiveness by canal")
+            bc = metrics["by_canal"].copy()
+            bc["conversion_rate"]      = bc["conversion_rate"].map(lambda x: f"{x:.1%}")
+            bc["revenue_captured_eur"] = bc["revenue_captured_eur"].map(lambda x: f"€{x:,.0f}")
+            st.dataframe(bc, use_container_width=True, hide_index=True)
+        with rr:
+            st.markdown("##### False-positive reasons (top)")
+            fp = metrics["false_positive_reasons"]
+            if len(fp):
+                st.dataframe(fp, use_container_width=True, hide_index=True)
+            else:
+                st.write("No false positives recorded.")
+
+        st.markdown("---")
+        st.markdown("##### 🎯 Recommended threshold adjustments")
+        for r in recommend_threshold_adjustments():
+            st.markdown(f"- {r}")
+
+        st.markdown("---")
+        st.markdown("##### How the loop closes")
+        st.code(
+"""Alert fires  →  Sales action  →  Outcome recorded
+                       ↓
+               Metrics aggregated
+                       ↓
+Threshold recommendations  →  Rule update  →  Better alerts""",
+            language="text",
+        )
+        st.caption("Each outcome adds one row to `analysis/alert_outcomes.csv`. "
+                   "The system never silently drops feedback — every recorded outcome "
+                   "appears here on next refresh.")
 
 # ----- Footer -----
 st.markdown("---")
-with st.expander("ℹ️ Architecture (data → analytical → activation layers)"):
+with st.expander("ℹ️ Architecture (data → analytical → activation → feedback layers)"):
     st.markdown("""
     **Data layer** — cleaned CSVs in `std_data/csv/` (5 sheets: Ventas, Clientes, Productos, Potencial, Campañas)
 
@@ -131,5 +204,10 @@ with st.expander("ℹ️ Architecture (data → analytical → activation layers
     - Sorted by `score = expected_impact_eur × urgency_factor`
     - Routed to `delegado` / `televenta` based on priority
 
-    **Daily cadence** — `generate_alerts(as_of_date)` recomputes for any date.
+    **Feedback layer** — `alert_outcomes.csv` records action + result per alert, fed back into:
+    - Conversion rate per `tipo_alerta` (precision)
+    - False-positive flagging
+    - Threshold-tuning recommendations
+
+    **Daily cadence** — `generate_alerts(as_of_date)` recomputes alerts for any date.
     """)

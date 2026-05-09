@@ -1,0 +1,121 @@
+outcome_id,alert_id,recorded_at,taken_by,action_taken,outcome_status,revenue_captured_eur,time_to_action_days,false_positive_reason,notes
+OUT-20260112-0001,ALT-20251229-000307,2026-01-12,DEL-136,visit,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20260107-0002,ALT-20251229-003093,2026-01-07,TELE-18,email,lost,0.0,9.0,,Cliente no convertido en esta ronda
+OUT-20260101-0003,ALT-20251229-001258,2026-01-01,TELE-07,call,won,714.04,3.0,,Cliente acepta visita / pedido confirmado
+OUT-20251231-0004,ALT-20251229-000772,2025-12-31,DEL-192,visit,won,917.25,2.0,,Cliente acepta visita / pedido confirmado
+OUT-20260107-0005,ALT-20251229-000075,2026-01-07,DEL-129,visit,lost,0.0,9.0,,Cliente no convertido en esta ronda
+OUT-20260113-0006,ALT-20251229-000020,2026-01-13,DEL-101,visit,lost,0.0,15.0,,Cliente no convertido en esta ronda
+OUT-20260105-0007,ALT-20251229-002145,2026-01-05,DEL-155,call,pending,0.0,7.0,,"En seguimiento, cita pendiente"
+OUT-20260105-0008,ALT-20251229-000779,2026-01-05,DEL-144,call,won,1445.52,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260126-0009,ALT-20251229-001144,2026-01-26,DEL-145,call,won,475.64,28.0,,Cliente acepta visita / pedido confirmado
+OUT-20260112-0010,ALT-20251229-000006,2026-01-12,DEL-159,visit,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20260106-0011,ALT-20251229-003465,2026-01-06,TELE-18,call,lost,0.0,8.0,,Cliente no convertido en esta ronda
+OUT-20260124-0012,ALT-20251229-001864,2026-01-24,TELE-07,email,lost,0.0,26.0,,Cliente no convertido en esta ronda
+OUT-20260105-0013,ALT-20251229-000120,2026-01-05,DEL-130,visit,pending,0.0,7.0,,"En seguimiento, cita pendiente"
+OUT-20260103-0014,ALT-20251229-000094,2026-01-03,DEL-149,visit,false_positive,0.0,5.0,Cliente cerró clínica,Cliente cerró clínica
+OUT-20260101-0015,ALT-20251229-000096,2026-01-01,DEL-127,visit,won,4420.52,3.0,,Cliente acepta visita / pedido confirmado
+OUT-20260110-0016,ALT-20251229-000213,2026-01-10,DEL-182,visit,lost,0.0,12.0,,Cliente no convertido en esta ronda
+OUT-20260102-0017,ALT-20251229-000584,2026-01-02,DEL-135,call,won,1136.89,4.0,,Cliente acepta visita / pedido confirmado
+OUT-20260204-0018,ALT-20251229-000401,2026-02-04,DEL-182,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260114-0019,ALT-20251229-000198,2026-01-14,DEL-199,visit,lost,0.0,16.0,,Cliente no convertido en esta ronda
+OUT-20251231-0020,ALT-20251229-000809,2025-12-31,DEL-204,call,pending,0.0,2.0,,"En seguimiento, cita pendiente"
+OUT-20260103-0021,ALT-20251229-000064,2026-01-03,DEL-192,visit,won,4237.23,5.0,,Cliente acepta visita / pedido confirmado
+OUT-20260104-0022,ALT-20251229-000199,2026-01-04,DEL-159,call,won,4825.96,6.0,,Cliente acepta visita / pedido confirmado
+OUT-20260104-0023,ALT-20251229-000295,2026-01-04,DEL-196,call,lost,0.0,6.0,,Cliente no convertido en esta ronda
+OUT-20260112-0024,ALT-20251229-000443,2026-01-12,DEL-175,visit,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20260126-0025,ALT-20251229-001547,2026-01-26,TELE-12,email,lost,0.0,28.0,,Cliente no convertido en esta ronda
+OUT-20251230-0026,ALT-20251229-000109,2025-12-30,DEL-197,call,won,7327.11,1.0,,Cliente acepta visita / pedido confirmado
+OUT-20260104-0027,ALT-20251229-000560,2026-01-04,TELE-14,call,won,2177.83,6.0,,Cliente acepta visita / pedido confirmado
+OUT-20260125-0028,ALT-20251229-000755,2026-01-25,DEL-177,call,lost,0.0,27.0,,Cliente no convertido en esta ronda
+OUT-20260121-0029,ALT-20251229-000015,2026-01-21,DEL-168,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260203-0030,ALT-20251229-000797,2026-02-03,DEL-102,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260113-0031,ALT-20251229-000086,2026-01-13,DEL-135,visit,lost,0.0,15.0,,Cliente no convertido en esta ronda
+OUT-20251231-0032,ALT-20251229-000023,2025-12-31,DEL-138,visit,pending,0.0,2.0,,"En seguimiento, cita pendiente"
+OUT-20260101-0033,ALT-20251229-003064,2026-01-01,TELE-09,call,lost,0.0,3.0,,Cliente no convertido en esta ronda
+OUT-20260129-0034,ALT-20251229-003372,2026-01-29,TELE-06,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260208-0035,ALT-20251229-001690,2026-02-08,TELE-10,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260113-0036,ALT-20251229-000039,2026-01-13,TELE-05,email,lost,0.0,15.0,,Cliente no convertido en esta ronda
+OUT-20260105-0037,ALT-20251229-001044,2026-01-05,DEL-168,call,won,1660.35,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260105-0038,ALT-20251229-000415,2026-01-05,DEL-103,visit,false_positive,0.0,7.0,Cliente prefiere competidor por contrato,Cliente prefiere competidor por contrato
+OUT-20260105-0039,ALT-20251229-000053,2026-01-05,DEL-204,visit,won,14798.82,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260103-0040,ALT-20251229-000520,2026-01-03,DEL-111,visit,won,2022.7,5.0,,Cliente acepta visita / pedido confirmado
+OUT-20260105-0041,ALT-20251229-000010,2026-01-05,DEL-169,call,won,23916.41,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260121-0042,ALT-20251229-002560,2026-01-21,DEL-161,call,pending,0.0,23.0,,"En seguimiento, cita pendiente"
+OUT-20260121-0043,ALT-20251229-000164,2026-01-21,DEL-122,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260128-0044,ALT-20251229-000965,2026-01-28,TELE-07,email,lost,0.0,30.0,,Cliente no convertido en esta ronda
+OUT-20260104-0045,ALT-20251229-000222,2026-01-04,DEL-186,call,false_positive,0.0,6.0,Cliente prefiere competidor por contrato,Cliente prefiere competidor por contrato
+OUT-20260115-0046,ALT-20251229-000573,2026-01-15,DEL-167,call,lost,0.0,17.0,,Cliente no convertido en esta ronda
+OUT-20260104-0047,ALT-20251229-000637,2026-01-04,DEL-109,call,lost,0.0,6.0,,Cliente no convertido en esta ronda
+OUT-20260205-0048,ALT-20251229-000097,2026-02-05,DEL-130,visit,lost,0.0,38.0,,Cliente no convertido en esta ronda
+OUT-20260105-0049,ALT-20251229-003458,2026-01-05,TELE-02,call,lost,0.0,7.0,,Cliente no convertido en esta ronda
+OUT-20251230-0050,ALT-20251229-001489,2025-12-30,DEL-166,visit,won,1566.29,1.0,,Cliente acepta visita / pedido confirmado
+OUT-20260114-0051,ALT-20251229-002923,2026-01-14,DEL-170,call,lost,0.0,16.0,,Cliente no convertido en esta ronda
+OUT-20260106-0052,ALT-20251229-002413,2026-01-06,TELE-16,email,won,536.17,8.0,,Cliente acepta visita / pedido confirmado
+OUT-20260106-0053,ALT-20251229-000770,2026-01-06,TELE-14,email,false_positive,0.0,8.0,Cliente cerró clínica,Cliente cerró clínica
+OUT-20260130-0054,ALT-20251229-002700,2026-01-30,TELE-02,call,lost,0.0,32.0,,Cliente no convertido en esta ronda
+OUT-20260101-0055,ALT-20251229-000034,2026-01-01,DEL-152,visit,lost,0.0,3.0,,Cliente no convertido en esta ronda
+OUT-20260104-0056,ALT-20251229-000106,2026-01-04,DEL-125,visit,lost,0.0,6.0,,Cliente no convertido en esta ronda
+OUT-20251231-0057,ALT-20251229-000239,2025-12-31,DEL-136,call,won,2637.99,2.0,,Cliente acepta visita / pedido confirmado
+OUT-20260108-0058,ALT-20251229-000329,2026-01-08,DEL-204,visit,lost,0.0,10.0,,Cliente no convertido en esta ronda
+OUT-20260101-0059,ALT-20251229-000177,2026-01-01,DEL-184,visit,false_positive,0.0,3.0,Cliente cerró clínica,Cliente cerró clínica
+OUT-20260113-0060,ALT-20251229-001835,2026-01-13,DEL-208,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260209-0061,ALT-20251229-000281,2026-02-09,DEL-197,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260108-0062,ALT-20251229-000187,2026-01-08,DEL-162,call,lost,0.0,10.0,,Cliente no convertido en esta ronda
+OUT-20260104-0063,ALT-20251229-000627,2026-01-04,DEL-122,call,lost,0.0,6.0,,Cliente no convertido en esta ronda
+OUT-20260105-0064,ALT-20251229-000065,2026-01-05,DEL-201,call,won,6487.73,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260112-0065,ALT-20251229-001650,2026-01-12,DEL-194,call,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20260203-0066,ALT-20251229-000027,2026-02-03,DEL-172,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260113-0067,ALT-20251229-003944,2026-01-13,TELE-10,email,lost,0.0,15.0,,Cliente no convertido en esta ronda
+OUT-20260103-0068,ALT-20251229-001472,2026-01-03,DEL-108,visit,won,1201.56,5.0,,Cliente acepta visita / pedido confirmado
+OUT-20260101-0069,ALT-20251229-000108,2026-01-01,DEL-175,visit,lost,0.0,3.0,,Cliente no convertido en esta ronda
+OUT-20260111-0070,ALT-20251229-000002,2026-01-11,DEL-108,visit,lost,0.0,13.0,,Cliente no convertido en esta ronda
+OUT-20260209-0071,ALT-20251229-001738,2026-02-09,DEL-111,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260105-0072,ALT-20251229-001139,2026-01-05,DEL-131,visit,won,491.87,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20260116-0073,ALT-20251229-001243,2026-01-16,TELE-02,email,lost,0.0,18.0,,Cliente no convertido en esta ronda
+OUT-20260111-0074,ALT-20251229-001467,2026-01-11,DEL-175,call,lost,0.0,13.0,,Cliente no convertido en esta ronda
+OUT-20260115-0075,ALT-20251229-000284,2026-01-15,DEL-134,visit,lost,0.0,17.0,,Cliente no convertido en esta ronda
+OUT-20260104-0076,ALT-20251229-000049,2026-01-04,DEL-134,visit,lost,0.0,6.0,,Cliente no convertido en esta ronda
+OUT-20260105-0077,ALT-20251229-002118,2026-01-05,DEL-110,visit,won,660.52,7.0,,Cliente acepta visita / pedido confirmado
+OUT-20251230-0078,ALT-20251229-000842,2025-12-30,DEL-110,visit,won,4474.16,1.0,,Cliente acepta visita / pedido confirmado
+OUT-20260105-0079,ALT-20251229-000246,2026-01-05,DEL-117,visit,lost,0.0,7.0,,Cliente no convertido en esta ronda
+OUT-20260210-0080,ALT-20251229-000022,2026-02-10,DEL-109,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260111-0081,ALT-20251229-000221,2026-01-11,TELE-15,call,lost,0.0,13.0,,Cliente no convertido en esta ronda
+OUT-20260104-0082,ALT-20251229-000238,2026-01-04,DEL-204,visit,pending,0.0,6.0,,"En seguimiento, cita pendiente"
+OUT-20260111-0083,ALT-20251229-001246,2026-01-11,DEL-205,visit,lost,0.0,13.0,,Cliente no convertido en esta ronda
+OUT-20260109-0084,ALT-20251229-000884,2026-01-09,DEL-134,visit,lost,0.0,11.0,,Cliente no convertido en esta ronda
+OUT-20260205-0085,ALT-20251229-002340,2026-02-05,DEL-120,visit,lost,0.0,38.0,,Cliente no convertido en esta ronda
+OUT-20260101-0086,ALT-20251229-000474,2026-01-01,DEL-127,visit,won,2029.39,3.0,,Cliente acepta visita / pedido confirmado
+OUT-20260109-0087,ALT-20251229-000051,2026-01-09,DEL-163,visit,lost,0.0,11.0,,Cliente no convertido en esta ronda
+OUT-20260106-0088,ALT-20251229-001168,2026-01-06,DEL-182,visit,lost,0.0,8.0,,Cliente no convertido en esta ronda
+OUT-20260101-0089,ALT-20251229-001409,2026-01-01,DEL-101,visit,lost,0.0,3.0,,Cliente no convertido en esta ronda
+OUT-20260101-0090,ALT-20251229-000674,2026-01-01,DEL-121,call,won,2823.95,3.0,,Cliente acepta visita / pedido confirmado
+OUT-20260122-0091,ALT-20251229-001465,2026-01-22,TELE-14,email,pending,0.0,24.0,,"En seguimiento, cita pendiente"
+OUT-20260102-0092,ALT-20251229-000517,2026-01-02,DEL-189,visit,lost,0.0,4.0,,Cliente no convertido en esta ronda
+OUT-20260114-0093,ALT-20251229-000579,2026-01-14,DEL-170,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260104-0094,ALT-20251229-000393,2026-01-04,DEL-119,visit,pending,0.0,6.0,,"En seguimiento, cita pendiente"
+OUT-20260105-0095,ALT-20251229-000007,2026-01-05,DEL-147,visit,lost,0.0,7.0,,Cliente no convertido en esta ronda
+OUT-20260102-0096,ALT-20251229-000045,2026-01-02,DEL-127,visit,pending,0.0,4.0,,"En seguimiento, cita pendiente"
+OUT-20260106-0097,ALT-20251229-000009,2026-01-06,DEL-200,visit,lost,0.0,8.0,,Cliente no convertido en esta ronda
+OUT-20260110-0098,ALT-20251229-000881,2026-01-10,DEL-196,call,lost,0.0,12.0,,Cliente no convertido en esta ronda
+OUT-20260114-0099,ALT-20251229-000225,2026-01-14,DEL-121,call,lost,0.0,16.0,,Cliente no convertido en esta ronda
+OUT-20260118-0100,ALT-20251229-000548,2026-01-18,DEL-204,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260111-0101,ALT-20251229-002542,2026-01-11,TELE-14,call,false_positive,0.0,13.0,Datos potencial obsoletos,Datos potencial obsoletos
+OUT-20260102-0102,ALT-20251229-000154,2026-01-02,DEL-121,call,pending,0.0,4.0,,"En seguimiento, cita pendiente"
+OUT-20260103-0103,ALT-20251229-000364,2026-01-03,DEL-105,visit,pending,0.0,5.0,,"En seguimiento, cita pendiente"
+OUT-20260101-0104,ALT-20251229-001381,2026-01-01,DEL-205,call,pending,0.0,3.0,,"En seguimiento, cita pendiente"
+OUT-20260104-0105,ALT-20251229-000135,2026-01-04,DEL-129,visit,false_positive,0.0,6.0,Cambio de propietario,Cambio de propietario
+OUT-20260101-0106,ALT-20251229-000028,2026-01-01,DEL-109,call,won,11517.98,3.0,,Cliente acepta visita / pedido confirmado
+OUT-20260124-0107,ALT-20251229-000197,2026-01-24,DEL-136,ignored,no_contact,0.0,,,No se logró contacto en la ventana objetivo
+OUT-20260111-0108,ALT-20251229-000079,2026-01-11,DEL-208,call,lost,0.0,13.0,,Cliente no convertido en esta ronda
+OUT-20260108-0109,ALT-20251229-002794,2026-01-08,TELE-09,call,lost,0.0,10.0,,Cliente no convertido en esta ronda
+OUT-20260103-0110,ALT-20251229-001688,2026-01-03,TELE-04,call,lost,0.0,5.0,,Cliente no convertido en esta ronda
+OUT-20260112-0111,ALT-20251229-000872,2026-01-12,DEL-201,visit,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20251230-0112,ALT-20251229-002193,2025-12-30,DEL-150,visit,won,1077.08,1.0,,Cliente acepta visita / pedido confirmado
+OUT-20260116-0113,ALT-20251229-001659,2026-01-16,DEL-191,call,false_positive,0.0,18.0,Cliente cerró clínica,Cliente cerró clínica
+OUT-20260115-0114,ALT-20251229-000098,2026-01-15,DEL-204,visit,lost,0.0,17.0,,Cliente no convertido en esta ronda
+OUT-20260106-0115,ALT-20251229-002391,2026-01-06,DEL-156,call,lost,0.0,8.0,,Cliente no convertido en esta ronda
+OUT-20260104-0116,ALT-20251229-000619,2026-01-04,DEL-209,visit,won,2880.34,6.0,,Cliente acepta visita / pedido confirmado
+OUT-20260120-0117,ALT-20251229-001795,2026-01-20,TELE-14,call,won,1175.34,22.0,,Cliente acepta visita / pedido confirmado
+OUT-20260205-0118,ALT-20251229-002513,2026-02-05,TELE-05,call,lost,0.0,38.0,,Cliente no convertido en esta ronda
+OUT-20260112-0119,ALT-20251229-000287,2026-01-12,TELE-10,call,lost,0.0,14.0,,Cliente no convertido en esta ronda
+OUT-20260105-0120,ALT-20251229-000066,2026-01-05,DEL-137,visit,lost,0.0,7.0,,Cliente no convertido en esta ronda

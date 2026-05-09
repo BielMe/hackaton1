@@ -16,6 +16,14 @@ streamlit run src/dashboard.py
 
 ```
 ┌─────────────────────────────────────────────┐
+│ Feedback layer                              │
+│   learning_loop.py                          │
+│   • alert_outcomes.csv (action + result)    │
+│   • compute_metrics()                       │
+│   • recommend_threshold_adjustments()       │
+└─────────────────────────────────────────────┘
+                     ▲
+┌─────────────────────────────────────────────┐
 │ Activation layer                            │
 │   build_alerts() → ranked alert table       │
 │   • tipo_alerta, motivo, prioridad          │
@@ -38,6 +46,27 @@ streamlit run src/dashboard.py
 │   Productos, Potencial, Mapping_familia     │
 └─────────────────────────────────────────────┘
 ```
+
+## Feedback / learning loop
+
+```
+   Alert fires  →  Sales action  →  Outcome recorded
+                          ↓
+                  Metrics aggregated
+                          ↓
+   Threshold recommendations  →  Rule update  →  Better alerts
+```
+
+Each outcome (won / lost / pending / no_contact / false_positive) is appended
+to `analysis/alert_outcomes.csv`. The Learning loop tab in the dashboard reads
+that file and emits:
+
+- conversion rate per `tipo_alerta` (precision)
+- false-positive heatmap with reasons
+- channel effectiveness comparison
+- plain-language threshold-tuning suggestions
+
+This is rule tuning, not ML retraining — analytical and explainable per the brief.
 
 ## Public API
 
