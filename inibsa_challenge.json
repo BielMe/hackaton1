@@ -1,0 +1,278 @@
+{
+  "challenge": {
+    "name": "Smart Demand Signals",
+    "sponsor": "Inibsa",
+    "event": "Interhack BCN 2026",
+    "framework": "BCN Clima",
+    "tagline": "Detalles del reto",
+    "full_title": "Smart Demand Signals: Predicción de necesidad de compra y detección temprana de riesgo de abandono en clínicas dentales"
+  },
+  "strategic_framing": {
+    "alignment": "Combines specialisation, innovation, and sustainable growth — Inibsa's positioning",
+    "sustainability_link": "Better commercial execution = more efficient use of time, effort, resources; optimised travel/displacement; 'generate more with less work'",
+    "barcelona_link": "Barcelona as the base of an industrial and health-sector project with international vocation"
+  },
+  "design_principles_required": [
+    "Data governance",
+    "Traceability",
+    "Prioritisation",
+    "Learning (feedback loop)",
+    "Fit within the commercial flow"
+  ],
+  "context": {
+    "company": "Inibsa is a locally-based pharmaceutical manufacturing company committed to European standards and sustainability criteria (efficient water and energy use).",
+    "scale": {
+      "client_base": "~7,000 dental clinics (challenge dataset focuses on ~6,000 with recurring commercial activity)",
+      "data_history": ">5 years of sales at client/product/date granularity",
+      "geographic_focus": "Spain (data more reliable than Portugal; Portugal out of initial scope)"
+    },
+    "business_problem": "Transform purchasing patterns into actionable predictive signals to promote sales of locally produced products and improve supply chain anticipation.",
+    "core_pipeline": "Purchase history → Signal detection → Alert → Commercial action"
+  },
+  "session_objectives": [
+    "Clarify the real environment of the problem",
+    "Delimit the scope of the dataset",
+    "Explain the main interpretation difficulties",
+    "Align expectations on the expected solution"
+  ],
+  "challenge_perimeter": {
+    "references_skus": 25,
+    "subfamilies": 5,
+    "clients": 6000,
+    "years_of_history": 5,
+    "scope_focus": [
+      "Product families that concentrate most of sales",
+      "Individual clinics with recurring commercial activity"
+    ]
+  },
+  "use_cases": {
+    "commodity_products": {
+      "examples": ["anaesthesia", "needles", "disinfection products"],
+      "purchase_frequency": "Recurring",
+      "variability_source": "Regular consumption",
+      "interpretation_risk": "Uncaptured demand (not materialised with Inibsa)",
+      "client_segments": {
+        "loyal": "Concentrate most of their demand with Inibsa",
+        "promiscuous": "Split demand with competitors or buy via alternative channels (depósitos)",
+        "marginal": "Buy residually / zero or marginal purchases"
+      },
+      "key_constraint": "Competitor activity is NOT directly observable — must be inferred from observed purchase pattern and client's relative potential.",
+      "solution_must": [
+        "Detect uncaptured demand in promiscuous clients",
+        "Estimate the optimal moment of contact",
+        "Identify early signals of deterioration in stable clients"
+      ],
+      "modeling_requirements": [
+        "Expected consumption models by clinic typology",
+        "Demand-change detection",
+        "Identification of structurally promiscuous clients (vs. one-off divergence)"
+      ]
+    },
+    "technical_products": {
+      "purchase_frequency": "More variable",
+      "variability_source": "Depends on type of clinical case, professional specialty, competitor penetration",
+      "interpretation_risk": "Confusing a normal pause with real churn",
+      "what_can_happen": "Some clients show enough recurrence to detect deviations — but that regularity is NOT guaranteed and must not be read rigidly.",
+      "solution_must_distinguish": [
+        "Normal variability",
+        "Temporal displacement",
+        "Real deterioration"
+      ],
+      "signals_to_detect": [
+        "Drop in frequency",
+        "Drop in volume",
+        "Absence of purchase",
+        "Anomalous activity vs. historical pattern"
+      ],
+      "recurrence_note": "Recurrence varies by clinic profile and product use type (systematic vs. occasional). Solution should incorporate, when it adds value, differences by clinic profile, specialty, and individual historical behaviour.",
+      "must_distinguish": "Sporadic patterns compatible with normal product use vs. real commercial deterioration"
+    }
+  },
+  "minimum_questions_to_answer": [
+    "Anticipate when a client should buy a product family again",
+    "Estimate when there is a real capture window vs. competitor",
+    "Detect when an apparently stable client starts showing churn signals",
+    "Distinguish normal consumption variations from relevant abandonment signals",
+    "Transform signals into useful, explainable, actionable commercial alerts"
+  ],
+  "objective": "Design an analytical solution that identifies, on a daily basis, signals indicating the need for commercial intervention at the level of client × product family × timing — differentiating commodity vs. technical products.",
+  "alert_definition": {
+    "must_answer": [
+      "Which client requires attention?",
+      "Which product family is affected?",
+      "What is happening (opportunity or risk)?",
+      "What priority does it have?"
+    ],
+    "minimum_payload": [
+      "Contact notice",
+      "Alert reason",
+      "Product family",
+      "Urgency level"
+    ],
+    "not_useful": [
+      "An isolated probability",
+      "An alert/classification the commercial team cannot interpret"
+    ]
+  },
+  "optimal_contact_moment": {
+    "definition": "Not the same across cases — solution must include intervention logic (static client classification is NOT enough).",
+    "by_segment": {
+      "loyal_clients": "When expected purchase frequency approaches or stock seems near depletion",
+      "promiscuous_clients": "When there is a reasonable window for capture against competitor",
+      "churn_risk_clients": "When historical pattern shows relevant deterioration vs. expected"
+    }
+  },
+  "functional_requirements": {
+    "daily_recalculation": true,
+    "actionable_decision_unit": "client × product family × reason × recommended intervention moment",
+    "differentiated_logic_by_category": "No universal logic expected — commodity vs. technical must be treated differently",
+    "alert_attributes": [
+      "contact recommendation",
+      "reason",
+      "affected product family",
+      "traceability (which variables/rules triggered it)"
+    ],
+    "prioritization_signals": [
+      "expected economic impact",
+      "time urgency",
+      "client potential value",
+      "conversion probability"
+    ],
+    "routing_channels": ["delegado (sales rep)", "televenta (telesales)", "marketing automation (e.g. HubSpot)"],
+    "architecture": "Standalone first, CRM-agnostic, designed for future integration",
+    "deployment_phase": "Standalone deploy is in scope; CRM integration is phase 2 (out of scope for the challenge but must be contemplated from the start)",
+    "geographic_scalability": "Initial focus on Spain; designed for future extension to other countries",
+    "post_alert_lifecycle": "Must define who manages the alert, within what timeframe, and how the result is recorded — to avoid the system becoming an analytical layer with no real execution impact",
+    "feedback_loop": "Record alert + commercial action + outcome to improve the model and detect false positives over time"
+  },
+  "open_approach": {
+    "framing": "Open innovation problem — teams choose business rules, statistical models, ML, or hybrid approaches.",
+    "non_negotiables": [
+      "Operational utility",
+      "Explainability",
+      "Maintainability",
+      "Evolution capability"
+    ],
+    "valued_if_added": [
+      "Seasonality and consumption cycles",
+      "Behaviour differences by clinic segment (using available data)",
+      "Heterogeneity of usage profiles",
+      "Specific treatment of sporadic-but-valid clients in technical products",
+      "Deviation detection vs. individual historical pattern",
+      "Incorporation of external/complementary variables, if analytically justified"
+    ],
+    "minimum_architecture": {
+      "daily_update_pipeline": true,
+      "layer_separation": ["data layer", "analytical layer", "activation layer"],
+      "alert_exposure": "Path that facilitates future CRM integration"
+    }
+  },
+  "expected_business_impact": [
+    "Increase sales in promiscuous clients",
+    "Increase order frequency in accounts with uncaptured demand",
+    "Reduce client loss / sales deterioration in loyal clients",
+    "Recover clients with activity loss",
+    "Improve commercial reaction capacity to early signals"
+  ],
+  "system_success_metrics": [
+    "Alert conversion rate",
+    "Inactive-client recovery rate",
+    "False-positive reduction",
+    "Progressive model performance improvement over time"
+  ],
+  "available_data": {
+    "datasets": {
+      "transactional": [
+        "Productos: product hierarchy",
+        "Ventas: SKU-level commercial transactions"
+      ],
+      "contextual": [
+        "Clientes: client data with location, type",
+        "Potencial: purchase potential per client (and family)"
+      ],
+      "explanatory": [
+        "Campañas: promotional campaign details"
+      ]
+    },
+    "data_format": [
+      "Client and product IDs are anonymized",
+      "Sold units are real",
+      "Sales values are in fictional monetary units (can be negative — returns)",
+      "Potential is provided per client and family, in the same units as sales"
+    ],
+    "granularity": "client × product × day",
+    "extra_fields": [
+      "purchase channel",
+      "representative or telesales activity",
+      "indirect/qualitative competitor indications",
+      "CRM commercial activity (free-text, optional/exploratory)"
+    ],
+    "data_quality_concerns": [
+      "Incomplete client histories",
+      "Product family normalisation",
+      "Product changes/substitutions",
+      "Irregular or seasonal purchases",
+      "Anomalies: extraordinary orders, promotions, stock breaks, commercial policy changes"
+    ],
+    "interpretive_caveats": [
+      "Units may be delivered at zero cost (replacement of damaged product)",
+      "Apparent lack of recurrence may be because the client is not registered or is delegated to a representative — not real absence",
+      "Client potential may be lower than real sold units due to mis-reported data",
+      "Campaigns may distort the pattern (volume noise observed as peaks rather than demonstrated structural demand)"
+    ]
+  },
+  "expected_deliverables": [
+    "Purchase-need prediction for commodities",
+    "Early churn-risk detection for technical products",
+    "Identification of competitor capture windows",
+    "Interpretable, actionable alerts",
+    "Operational prioritisation logic",
+    "Daily-operation proposal",
+    "Standalone architecture with CRM-evolution path",
+    "Self-learning capability from alert outcomes"
+  ],
+  "errors_to_avoid": {
+    "interpretation": [
+      "Assuming competitor or indirect-channel purchases are observable — they are not",
+      "Treating every purchase silence as churn"
+    ],
+    "solution_design": [
+      "Producing alerts without explanation or prioritization"
+    ],
+    "expectation": [
+      "Aiming for a finished, closed implementation rather than a plausible, defensible solution"
+    ]
+  },
+  "what_a_good_proposal_does": [
+    "Differentiates well between commodities and technical products",
+    "Clearly explains the alert logic",
+    "Generates traceable and prioritizable alerts",
+    "Is operational in a real commercial environment",
+    "Proposes a reasonable minimum architecture",
+    "Has plausible evolution toward real use",
+    "Note: the key is not technical sophistication but analytical and commercial utility"
+  ],
+  "scope_in_out": {
+    "do_not_expect": [
+      "Integration with CRM or other systems",
+      "Final/definitive implementation",
+      "A solution tied to a specific technology"
+    ],
+    "do_expect": [
+      "Solid logic",
+      "Actionable output",
+      "Proposal coherent with daily operation",
+      "Reasoning about limitations and risks"
+    ]
+  },
+  "evaluation_criteria": [
+    "Translation of complex business problem into useful analytical solution",
+    "Intelligent commodity vs. technical differentiation",
+    "Quality of predictive logic",
+    "Interpretability and traceability of alerts",
+    "Prioritisation and fit within commercial process",
+    "Real applicability in commercial environment",
+    "Scalability and viability of future evolution"
+  ],
+  "task_for_assistant": "Help design and prototype the Smart Demand Signals system. When proposing approaches, explicitly: (1) distinguish commodity vs. technical product logic; (2) for commodities — model expected demand vs. potential and detect uncaptured demand without observing competitors directly; (3) for technical products — distinguish normal variability, temporal displacement, and real deterioration; (4) generate alerts with the minimum payload (contact notice, reason, product family, urgency), full traceability, and prioritisation by economic impact / conversion probability / time urgency; (5) define an optimal-contact-moment logic per segment (loyal / promiscuous / churn-risk) — not a static classification; (6) propose a standalone, CRM-agnostic architecture with a feedback loop on alert outcomes; (7) flag data-quality assumptions and interpretive caveats explicitly."
+}

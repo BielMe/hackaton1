@@ -1,0 +1,15 @@
+id_cliente,codigo_postal,provincia,kept
+42542,09002,Burgos,True
+42542,09004,Burgos,False
+42650,11008,Cádiz,True
+42650,11202,Cádiz,False
+42865,24002,León,True
+42865,24004,León,False
+1000081932,11540,Cádiz,True
+1000081932,41004,Sevilla,False
+1000082431,30007,Murcia,True
+1000082431,30110,Murcia,False
+1000082758,15009,A Coruña,True
+1000082758,15670,A Coruña,False
+1000102368,33201,Asturias,True
+1000102368,33205,Asturias,False
