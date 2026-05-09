@@ -65,7 +65,7 @@ if client_search.strip():
 st.title("📊 Smart Demand Signals")
 st.markdown(f"**Inibsa · Interhack BCN 2026** — Daily alert generator for {ref}")
 
-tab_alerts, tab_learning = st.tabs(["📋 Alerts", "📈 Learning loop"])
+tab_alerts, tab_learning, tab_profile = st.tabs(["📋 Alerts", "📈 Learning loop", "🔍 Client profile"])
 
 # ====================================================================
 # TAB 1 — Alerts
@@ -115,12 +115,14 @@ with tab_alerts:
     top_n = st.slider("How many to show", min_value=10, max_value=200, value=25, step=5)
 
     table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
-                  "prioridad", "score", "expected_impact_eur", "urgency_factor",
+                  "loyalty_tier", "trend", "prioridad", "score",
+                  "expected_impact_eur", "urgency_factor", "conversion_probability",
                   "canal_recomendado", "contact_window_days", "motivo"]
     display = f.head(top_n)[table_cols].copy()
     display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
     display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
     display["urgency_factor"] = display["urgency_factor"].map(lambda x: f"{x:.2f}")
+    display["conversion_probability"] = display["conversion_probability"].map(lambda x: f"{x:.2f}")
     st.dataframe(display, use_container_width=True, hide_index=True)
 
     # Export buttons
@@ -158,7 +160,7 @@ with tab_alerts:
         with cc2:
             st.metric("Score", f"{row['score']:,.0f}")
             st.metric("Impact (€)", f"€{row['expected_impact_eur']:,.0f}")
-            st.metric("Urgency", f"{row['urgency_factor']:.2f}")
+            st.metric("Urgency × Conv prob", f"{row['urgency_factor']:.2f} × {row['conversion_probability']:.2f}")
         st.markdown("**🧩 Trace features (why this alert fired):**")
         trace = json.loads(row["trace_features"])
         st.json(trace)
@@ -240,6 +242,96 @@ Threshold recommendations  →  Rule update  →  Better alerts""",
         st.caption("Each outcome adds one row to `analysis/alert_outcomes.csv`. "
                    "The system never silently drops feedback — every recorded outcome "
                    "appears here on next refresh.")
+
+# ====================================================================
+# TAB 3 — Client profile (drill into one clinic's full story)
+# ====================================================================
+with tab_profile:
+    st.markdown("### Single-client deep dive")
+    st.caption("Pick a clinic. See everything the system knows about them: alerts "
+               "across product families, segmentation, purchase history.")
+
+    suggested = (alerts.groupby("id_cliente")["score"].sum()
+                 .sort_values(ascending=False).head(20).index.tolist())
+    pick = st.selectbox("Pick a client (top 20 by aggregate score)", options=suggested)
+    typed = st.text_input("...or type any id_cliente", value="")
+    target = (typed.strip() or pick) if (typed.strip() or pick) else None
+
+    if target:
+        # Header info from Clientes
+        cli = data["clientes"]
+        cli_row = cli[cli["id_cliente"].astype(str) == str(target)]
+        if cli_row.empty:
+            st.warning(f"Client `{target}` not in registered Clientes table — "
+                       f"could be `cliente_no_registrado=True` (delegated client).")
+        else:
+            cli_row = cli_row.iloc[0]
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Cliente", str(target))
+            h2.metric("Provincia", cli_row["provincia"])
+            h3.metric("Código postal", cli_row["codigo_postal"])
+
+        # All alerts for this client right now
+        st.markdown("---")
+        st.markdown("##### Active alerts (today)")
+        cli_alerts = alerts[alerts["id_cliente"].astype(str) == str(target)]
+        if cli_alerts.empty:
+            st.success("No active alerts — this client is healthy across all product families.")
+        else:
+            view = cli_alerts[["familia", "tipo_alerta", "loyalty_tier", "trend",
+                               "prioridad", "score", "expected_impact_eur",
+                               "conversion_probability", "motivo"]].copy()
+            view["score"] = view["score"].map(lambda x: f"{x:,.0f}")
+            view["expected_impact_eur"] = view["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
+            view["conversion_probability"] = view["conversion_probability"].map(lambda x: f"{x:.2f}")
+            st.dataframe(view, use_container_width=True, hide_index=True)
+
+        # Purchase history chart
+        st.markdown("---")
+        st.markdown("##### Purchase history")
+        v = data["ventas"]
+        cli_ventas = v[(v["id_cliente"].astype(str) == str(target))
+                       & (v["tipo_transaccion"] == "venta")].copy()
+        if cli_ventas.empty:
+            st.info("No purchase history found.")
+        else:
+            cli_ventas["fecha"] = pd.to_datetime(cli_ventas["fecha"])
+            cli_ventas["mes"] = cli_ventas["fecha"].dt.to_period("M").astype(str)
+            monthly = (cli_ventas.groupby(["mes", "bloque_analitico"])["valores_h"]
+                       .sum().reset_index())
+            pivot = monthly.pivot(index="mes", columns="bloque_analitico",
+                                  values="valores_h").fillna(0)
+            st.bar_chart(pivot, height=300)
+            ph1, ph2, ph3 = st.columns(3)
+            ph1.metric("Lifetime €", f"€{cli_ventas['valores_h'].sum():,.0f}")
+            ph2.metric("Total purchases", f"{len(cli_ventas):,}")
+            ph3.metric("Last purchase", cli_ventas["fecha"].max().date().isoformat())
+
+        # Segmentation snapshot
+        st.markdown("---")
+        st.markdown("##### Segmentation across product families")
+        v_filtered = data["ventas"][
+            (~data["ventas"]["cliente_no_registrado"])
+            & (data["ventas"]["tipo_transaccion"].isin(["venta", "devolucion"]))
+            & (data["ventas"]["fecha"] <= pd.Timestamp(ref))
+        ]
+        from smart_demand_signals import commodity_segments, technical_patterns
+        cs = commodity_segments(v_filtered, data["potencial"], pd.Timestamp(ref))
+        tp = technical_patterns(v_filtered, pd.Timestamp(ref))
+        cs_cli = cs[cs["id_cliente"].astype(str) == str(target)]
+        tp_cli = tp[tp["id_cliente"].astype(str) == str(target)]
+        cs_view = cs_cli[["categoria_h", "segment", "loyalty_tier", "trend",
+                          "share_of_potential", "volume_eur_current",
+                          "volume_eur_baseline", "potencial_h", "recency_days"]]
+        tp_view = tp_cli[["familia_h", "pattern", "trend", "recency_days",
+                          "frequency_recent", "volume_recent",
+                          "expected_vol_recent", "lifetime_volume"]]
+        st.markdown("**Commodities**")
+        st.dataframe(cs_view if len(cs_view) else pd.DataFrame({"info": ["no commodity activity"]}),
+                     use_container_width=True, hide_index=True)
+        st.markdown("**Productos Técnicos**")
+        st.dataframe(tp_view if len(tp_view) else pd.DataFrame({"info": ["no technical activity"]}),
+                     use_container_width=True, hide_index=True)
 
 # ----- Footer -----
 st.markdown("---")

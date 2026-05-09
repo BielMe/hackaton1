@@ -166,6 +166,30 @@ def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
         return "promiscuous"
 
     agg["segment"] = agg.apply(label, axis=1)
+
+    # Loyalty tier — sub-labels within the 5-30% promiscuous band for nuance
+    def loyalty_tier(r):
+        s = r["share_of_potential"]
+        if s is None or pd.isna(s):
+            return "unknown"
+        if s >= 0.30: return "loyal"
+        if s >= 0.20: return "near_loyal"
+        if s >= 0.10: return "moderate"
+        if s >= 0.05: return "weakly_engaged"
+        return "marginal"
+    agg["loyalty_tier"] = agg.apply(loyalty_tier, axis=1)
+
+    # Trend — current period vs baseline
+    def trend(r):
+        base, curr = r["volume_eur_baseline"], r["volume_eur_current"]
+        if base <= 0:
+            return "new" if curr > 0 else "inactive"
+        ratio = curr / base
+        if ratio >= 1.20: return "improving"
+        if ratio <= 0.80: return "declining"
+        return "stable"
+    agg["trend"] = agg.apply(trend, axis=1)
+
     return agg
 
 
@@ -259,6 +283,15 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
         return "occasional_active"
 
     df["pattern"] = df.apply(pattern, axis=1)
+
+    # Trend based on volume drop ratio
+    def trend(r):
+        if pd.isna(r["vol_drop_ratio"]):
+            return "new" if r["volume_recent"] > 0 else "inactive"
+        if r["vol_drop_ratio"] >= 1.20: return "improving"
+        if r["vol_drop_ratio"] <= 0.80: return "declining"
+        return "stable"
+    df["trend"] = df.apply(trend, axis=1)
     return df
 
 
@@ -269,6 +302,7 @@ def _commodity_alert(r):
         rec = r["recency_days"] if pd.notna(r["recency_days"]) else 365
         impact = max(0.0, r["volume_eur_baseline"]) * 0.3   # discounted — recovery is hard
         urg = 0.2  # low urgency
+        conv = 0.10  # already lost — recovery is unlikely
         tipo = "lost"
         motivo = f"Cliente perdido (>{int(rec)}d sin compra): campaña de recuperación"
         prio = "Low"
@@ -276,7 +310,10 @@ def _commodity_alert(r):
     elif seg == "promiscuous":
         impact = max(0.0, (r["potencial_h"] or 0) - r["volume_eur_current"])
         urg, tipo = 0.7, "capture_window"
-        motivo = (f"Cliente promiscuo: capturado {r['share_of_potential']:.0%} del potencial; "
+        # conversion_probability: closer to loyal = higher prob (capped at 1.0)
+        share = r["share_of_potential"] or 0
+        conv = min(1.0, max(0.10, share / 0.30))
+        motivo = (f"Cliente promiscuo: capturado {share:.0%} del potencial; "
                   f"€{impact:,.0f} de demanda desviada a competencia")
         prio = "High" if impact > 1500 else ("Medium" if impact > 500 else "Low")
         canal = "delegado" if prio == "High" else "televenta"
@@ -285,6 +322,8 @@ def _commodity_alert(r):
         impact = max(0.0, r["volume_eur_baseline"])
         rec = r["recency_days"] if pd.notna(r["recency_days"]) else 365
         urg = max(0.2, 1.0 - max(0, rec - 180) / 365)
+        # conversion decays with recency — recoverable in first 6 months
+        conv = max(0.10, 1.0 - max(0, rec - 90) / 365)
         tipo = "silent"
         motivo = f"Cliente leal silencioso: €{impact:,.0f}/año en baseline; sin compra desde {rec:.0f}d"
         prio = "High" if (impact > 1000 and rec < 365) else "Medium"
@@ -293,11 +332,13 @@ def _commodity_alert(r):
     else:  # churn_risk_dropping
         impact = max(0.0, r["volume_eur_baseline"] - r["volume_eur_current"])
         urg, tipo = 0.9, "churn_risk"
+        # still buying, just less — high conversion if caught early
+        conv = 0.65
         motivo = f"Caída sostenida: €{r['volume_eur_baseline']:,.0f}→€{r['volume_eur_current']:,.0f}"
         prio = "High" if impact > 1500 else "Medium"
         canal = "delegado" if prio == "High" else "televenta"
         win = 7 if prio == "High" else 30
-    return tipo, motivo, prio, impact, urg, canal, win
+    return tipo, motivo, prio, impact, urg, canal, win, conv
 
 
 def _technical_alert(r):
@@ -305,6 +346,7 @@ def _technical_alert(r):
     if pat == "systematic_deterioration":
         impact = max(0.0, r["expected_vol_recent"] - r["volume_recent"]) * 4
         urg, tipo = 0.95, "churn_risk"
+        conv = 0.55  # active and slipping — moderate recovery odds
         motivo = (f"Cliente sistemático deteriorándose: €{r['volume_recent']:,.0f} vs "
                   f"esperado €{r['expected_vol_recent']:,.0f}")
         prio = "High" if impact > 2000 else "Medium"
@@ -315,6 +357,7 @@ def _technical_alert(r):
         impact = max(0.0, annual)
         rec = r["recency_days"]
         urg = max(0.2, 1.0 - max(0, rec - 180) / 365)
+        conv = max(0.10, 1.0 - max(0, rec - 90) / 365)
         tipo = "silent"
         motivo = f"Cliente sistemático silencioso: ~€{annual:,.0f}/año en histórico, sin compra {rec:.0f}d"
         prio = "High" if (impact > 5000 and rec < 365) else "Medium"
@@ -322,18 +365,20 @@ def _technical_alert(r):
     elif pat == "occasional_silent":
         impact = max(0.0, r["volume_baseline"])
         urg, tipo = 0.5, "silent"
+        conv = 0.30  # occasional buyers reactivate less reliably
         motivo = f"Cliente ocasional sin compra reciente: €{impact:,.0f} en período baseline"
         prio = "Medium" if impact > 500 else "Low"
         canal, win = "televenta", (30 if prio == "Medium" else 90)
     else:  # spike
         impact = max(0.0, r["volume_recent"] - r["expected_vol_recent"])
         urg, tipo = 0.4, "opportunity_spike"
+        conv = 0.50  # half are real, half are noise
         motivo = (f"Pico anómalo: €{r['volume_recent']:,.0f} vs esperado €{r['expected_vol_recent']:,.0f} "
                   f"— investigar oportunidad")
         prio = "Medium" if impact > 1000 else "Low"
         canal = "delegado" if prio == "Medium" else "televenta"
         win = 30
-    return tipo, motivo, prio, impact, urg, canal, win
+    return tipo, motivo, prio, impact, urg, canal, win, conv
 
 
 def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
@@ -344,7 +389,7 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
 
     for _, r in comm_seg[comm_seg["segment"].isin(
             ["promiscuous", "churn_risk_silent", "churn_risk_dropping", "lost"])].iterrows():
-        tipo, motivo, prio, impact, urg, canal, win = _commodity_alert(r)
+        tipo, motivo, prio, impact, urg, canal, win, conv = _commodity_alert(r)
         rows.append({
             "id_cliente": r["id_cliente"],
             "bloque_analitico": "Commodities",
@@ -352,23 +397,29 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
             "familia": r["categoria_h"],
             "familia_comercial": fam_map.get(r["categoria_h"]),
             "segment_or_pattern": r["segment"],
+            "loyalty_tier": r.get("loyalty_tier", ""),
+            "trend": r.get("trend", ""),
             "tipo_alerta": tipo, "motivo": motivo, "prioridad": prio,
             "expected_impact_eur": impact, "urgency_factor": urg,
+            "conversion_probability": conv,
             "canal_recomendado": canal, "contact_window_days": win,
             "trace_features": json.dumps({
                 "segment": r["segment"],
+                "loyalty_tier": r.get("loyalty_tier", ""),
+                "trend": r.get("trend", ""),
                 "share_of_potential": float(r["share_of_potential"]) if pd.notna(r["share_of_potential"]) else None,
                 "potencial_h": float(r["potencial_h"]),
                 "volume_eur_current": float(r["volume_eur_current"]),
                 "volume_eur_baseline": float(r["volume_eur_baseline"]),
                 "recency_days": float(r["recency_days"]) if pd.notna(r["recency_days"]) else None,
+                "conversion_probability": conv,
             }),
         })
 
     for _, r in tech_pat[tech_pat["pattern"].isin([
             "systematic_deterioration", "systematic_silent", "occasional_silent",
             "systematic_spike", "occasional_spike"])].iterrows():
-        tipo, motivo, prio, impact, urg, canal, win = _technical_alert(r)
+        tipo, motivo, prio, impact, urg, canal, win, conv = _technical_alert(r)
         rows.append({
             "id_cliente": r["id_cliente"],
             "bloque_analitico": "Productos Técnicos",
@@ -376,11 +427,15 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
             "familia": r["familia_h"],
             "familia_comercial": "Biomateriales (técnicos)",
             "segment_or_pattern": r["pattern"],
+            "loyalty_tier": "",
+            "trend": r.get("trend", ""),
             "tipo_alerta": tipo, "motivo": motivo, "prioridad": prio,
             "expected_impact_eur": impact, "urgency_factor": urg,
+            "conversion_probability": conv,
             "canal_recomendado": canal, "contact_window_days": win,
             "trace_features": json.dumps({
                 "pattern": r["pattern"],
+                "trend": r.get("trend", ""),
                 "recency_days": float(r["recency_days"]) if pd.notna(r["recency_days"]) else None,
                 "frequency_recent": int(r["frequency_recent"]),
                 "frequency_baseline": int(r["frequency_baseline"]),
@@ -388,13 +443,17 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
                 "expected_vol_recent": float(r["expected_vol_recent"]),
                 "mean_interpurchase_days": float(r["mean_interpurchase_days"]) if pd.notna(r["mean_interpurchase_days"]) else None,
                 "lifetime_volume": float(r["lifetime_volume"]),
+                "conversion_probability": conv,
             }),
         })
 
     a = pd.DataFrame(rows)
     if a.empty:
         return a
-    a["score"] = a["expected_impact_eur"] * a["urgency_factor"]
+    # score = impact × urgency × conversion_probability
+    # (the brief lists all four prioritisation signals; client_potential_value
+    #  is implicit in expected_impact_eur, time_urgency in urgency_factor)
+    a["score"] = a["expected_impact_eur"] * a["urgency_factor"] * a["conversion_probability"]
     a["fecha_alerta"] = as_of.date()
     a = a.merge(clientes[["id_cliente", "provincia"]], on="id_cliente", how="left")
     a = a.sort_values("score", ascending=False).reset_index(drop=True)
@@ -402,8 +461,9 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
     return a[[
         "alert_id", "fecha_alerta", "id_cliente", "provincia",
         "bloque_analitico", "categoria_h", "familia", "familia_comercial",
-        "tipo_alerta", "motivo", "segment_or_pattern",
+        "tipo_alerta", "motivo", "segment_or_pattern", "loyalty_tier", "trend",
         "prioridad", "score", "expected_impact_eur", "urgency_factor",
+        "conversion_probability",
         "canal_recomendado", "contact_window_days", "trace_features",
     ]]
 
