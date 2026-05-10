@@ -1,0 +1,26 @@
+SCENE 01
+Welcome to Inibsa Alert Marker by Mythos Group. This is the daily call list our system generates for Inibsa's six thousand dental clinics. The system has automatically flagged a client. Let's see what it found.
+
+SCENE 02
+The client is flagged as a lost client, with a clear next action: a periodic reminder. Two hundred eighty three days without a purchase, and a historic volume of around four thousand euros a year. Province, last purchase date, and average cycle are all visible at a glance.
+
+SCENE 03
+Crucial detail. Cycle status reads: overdue, ninety nine percent past the normal cycle. We are not flagging absolute silence; we are flagging silence that is abnormal for this specific client. The chart on the bottom confirms the drop in purchases over time.
+
+SCENE 04
+Switching to monitoring. The KPI strip splits all alerts into four sales-team-readable categories: lost clients, loss risk, sales opportunities, and healthy clients. No technical labels, just actions.
+
+SCENE 05
+Charts break alerts down by category and channel, and by province and product family. Most of the work falls on sales opportunities and loss risk, the actionable groups. Marketing automation absorbs low-priority alerts, freeing up the sales reps.
+
+SCENE 06
+The priority alert table is filterable, sortable, and exportable as CSV or as HubSpot Tasks JSON. The system is standalone today and CRM ready tomorrow, no rewrites needed.
+
+SCENE 07
+Final piece, the feedback loop. The disclaimer at the top makes it clear: these outcomes are mocked demo data, labelled as such. Real outcomes will flow in from the CRM. We already track conversion, false positives, and revenue captured.
+
+SCENE 08
+Capture window alerts convert at thirty three percent. Silent alerts at eleven percent. The system already shows which alert types pull their weight, and which ones need their thresholds tuned.
+
+SCENE 09
+And below, automatic threshold adjustment suggestions. When real outcomes accumulate, the system tunes its own rules. No retraining. No black box. Eight of eight brief deliverables shipped. Thank you for watching.
