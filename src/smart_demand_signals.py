@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import warnings
 from pathlib import Path
+import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
@@ -110,6 +111,91 @@ def filter_commercial_activity(ventas: pd.DataFrame, as_of: pd.Timestamp) -> pd.
     ].copy()
 
 
+# -------------------- CLIENT PROFILES --------------------
+def build_client_profiles(v: pd.DataFrame, potencial: pd.DataFrame,
+                           as_of: pd.Timestamp) -> pd.DataFrame:
+    """Per-client profile aggregating cycle / recurrence / health metrics.
+
+    Used by the dashboard's Client view. Critically:
+    - share_of_potential uses TRAILING 12 MONTHS (not lifetime) so it never goes >100%
+    - cycle_progress = recency / mean_interpurchase_days (>1 means overdue)
+    """
+    if len(v) == 0:
+        return pd.DataFrame()
+    cs = (v.groupby("id_cliente")
+            .agg(total_purchases=("fecha", "nunique"),
+                 total_units=("unidades", "sum"),
+                 lifetime_eur=("valores_h", "sum"),
+                 first_purchase=("fecha", "min"),
+                 last_purchase=("fecha", "max"),
+                 n_transactions=("num_factura", "nunique"))
+            .reset_index())
+    cs["recency_days"]  = (as_of - cs["last_purchase"]).dt.days
+    cs["lifespan_days"] = (cs["last_purchase"] - cs["first_purchase"]).dt.days
+
+    # Mean interpurchase / cyclicity (need ≥3 purchases = ≥2 gaps)
+    sorted_v = (v[["id_cliente", "fecha"]].drop_duplicates()
+                  .sort_values(["id_cliente", "fecha"]))
+    sorted_v["gap"] = sorted_v.groupby("id_cliente")["fecha"].diff().dt.days
+    gap_stats = (sorted_v.dropna(subset=["gap"])
+                          .groupby("id_cliente")["gap"]
+                          .agg(["mean", "std", "count"])
+                          .reset_index())
+    gap_stats.columns = ["id_cliente", "mean_interpurchase_days", "cycle_std", "gap_count"]
+    gap_stats = gap_stats[gap_stats["gap_count"] >= 2]
+    gap_stats["cyclicity_score"] = (
+        1 - gap_stats["cycle_std"] / gap_stats["mean_interpurchase_days"].clip(lower=1)
+    ).clip(0, 1)
+    cs = cs.merge(
+        gap_stats[["id_cliente", "mean_interpurchase_days", "cycle_std", "cyclicity_score"]],
+        on="id_cliente", how="left")
+
+    # Trailing 12m volume — for the correct share_of_potential
+    d365 = as_of - pd.Timedelta(days=365)
+    last_year = (v[v["fecha"] > d365].groupby("id_cliente")["valores_h"].sum()
+                                       .reset_index().rename(columns={"valores_h": "eur_last_12m"}))
+    cs = cs.merge(last_year, on="id_cliente", how="left")
+    cs["eur_last_12m"] = cs["eur_last_12m"].fillna(0)
+
+    # Recent (6m) vs prior 6m for trend
+    d180 = as_of - pd.Timedelta(days=180)
+    d360 = as_of - pd.Timedelta(days=360)
+    rv = (v[v["fecha"] > d180].groupby("id_cliente")["valores_h"].sum()
+            .reset_index().rename(columns={"valores_h": "eur_recent_6m"}))
+    bv = (v[(v["fecha"] > d360) & (v["fecha"] <= d180)].groupby("id_cliente")["valores_h"].sum()
+            .reset_index().rename(columns={"valores_h": "eur_baseline_6m"}))
+    cs = cs.merge(rv, on="id_cliente", how="left").merge(bv, on="id_cliente", how="left")
+    cs["eur_recent_6m"]   = cs["eur_recent_6m"].fillna(0)
+    cs["eur_baseline_6m"] = cs["eur_baseline_6m"].fillna(0)
+    cs["potential_trend"] = np.where(
+        cs["eur_baseline_6m"] > 0,
+        (cs["eur_recent_6m"] - cs["eur_baseline_6m"]) / cs["eur_baseline_6m"],
+        np.where(cs["eur_recent_6m"] > 0, 1.0, 0.0))
+
+    # Potential — sum across categorías
+    pt = (potencial.groupby("id_cliente")["potencial_h"].sum().reset_index()
+                    .rename(columns={"potencial_h": "potencial_total"}))
+    cs = cs.merge(pt, on="id_cliente", how="left")
+    cs["potencial_total"] = cs["potencial_total"].fillna(0)
+    # Correct share — TRAILING 12 MONTHS (annual) divided by annual potential
+    cs["share_of_potential"] = np.where(
+        cs["potencial_total"] > 0,
+        cs["eur_last_12m"] / cs["potencial_total"],
+        np.nan)
+
+    # Cycle progress — how far through the expected cycle
+    cs["cycle_progress"] = np.where(
+        cs["mean_interpurchase_days"].notna() & (cs["mean_interpurchase_days"] > 0),
+        cs["recency_days"] / cs["mean_interpurchase_days"], np.nan)
+    cs["next_expected_purchase"] = pd.NaT
+    has_cycle = cs["mean_interpurchase_days"].notna()
+    cs.loc[has_cycle, "next_expected_purchase"] = (
+        cs.loc[has_cycle, "last_purchase"]
+        + pd.to_timedelta(cs.loc[has_cycle, "mean_interpurchase_days"], unit="D"))
+    cs["days_until_next_purchase"] = (cs["next_expected_purchase"] - as_of).dt.days
+    return cs
+
+
 # -------------------- ANALYTICAL LAYER --------------------
 def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
                        as_of: pd.Timestamp) -> pd.DataFrame:
@@ -144,6 +230,21 @@ def commodity_segments(v: pd.DataFrame, potencial: pd.DataFrame,
               .reset_index().rename(columns={"fecha": "last_purchase"}))
     rec["recency_days"] = (as_of - rec["last_purchase"]).dt.days
     agg = agg.merge(rec[["id_cliente", "categoria_h", "recency_days"]],
+                    on=["id_cliente", "categoria_h"], how="left")
+
+    # Mean interpurchase days per (cliente, categoria) — used for dynamic windows + cyclic filter
+    sorted_com = com[["id_cliente", "categoria_h", "fecha"]].drop_duplicates().sort_values(
+        ["id_cliente", "categoria_h", "fecha"])
+    sorted_com["gap"] = sorted_com.groupby(["id_cliente", "categoria_h"])["fecha"].diff().dt.days
+    mipd = (sorted_com.dropna(subset=["gap"])
+                       .groupby(["id_cliente", "categoria_h"])["gap"].mean()
+                       .reset_index().rename(columns={"gap": "mean_interpurchase_days"}))
+    agg = agg.merge(mipd, on=["id_cliente", "categoria_h"], how="left")
+    # Lifespan (first → last purchase) for safe annual projection
+    span = (com.groupby(["id_cliente", "categoria_h"])["fecha"]
+                .agg(first_purchase="min", last_purchase="max").reset_index())
+    span["lifespan_days"] = (span["last_purchase"] - span["first_purchase"]).dt.days
+    agg = agg.merge(span[["id_cliente", "categoria_h", "lifespan_days"]],
                     on=["id_cliente", "categoria_h"], how="left")
 
     pot = potencial.groupby(["id_cliente", "categoria_h"])["potencial_h"].sum().reset_index()
@@ -271,6 +372,9 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
 
     def pattern(r):
         if r["purchase_days_total"] < 3: return "insufficient_history"
+        # 9+ months silent -> a candidate for `lost` (gated by _is_cyclic_client downstream)
+        if pd.notna(r["recency_days"]) and r["recency_days"] >= 270:
+            return "lost"
         sys_pat = pd.notna(r["mean_interpurchase_days"]) and r["mean_interpurchase_days"] <= 90
         if sys_pat:
             if r["signal_absent"]: return "systematic_silent"
@@ -296,48 +400,101 @@ def technical_patterns(v: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
 
 
 # -------------------- ACTIVATION LAYER --------------------
+# Tunable thresholds for the cyclic-client filter on `lost` alerts.
+MIN_PURCHASES_FOR_LOST = 3      # need at least this many distinct purchase days
+MIN_VOLUME_FOR_LOST    = 200    # and at least €200 lifetime to be worth pursuing
+MAX_CYCLE_FOR_LOST     = 365    # if their cycle is >1y they are not really cyclic
+MIN_LIFESPAN_FOR_ANNUAL = 90    # don't extrapolate annual rate from <90 days
+
+
+def _safe_annual(lifetime_volume, lifespan_days):
+    """Project annual volume only if there's enough history. Otherwise return raw total."""
+    ls = lifespan_days if pd.notna(lifespan_days) and lifespan_days > 0 else 0
+    if ls >= MIN_LIFESPAN_FOR_ANNUAL:
+        return (lifetime_volume / ls) * 365
+    return lifetime_volume
+
+
+def _is_cyclic_client(r, block="commodity"):
+    """Did this client buy enough times to be worth a `lost` recovery alert?"""
+    if block == "commodity":
+        freq = (r.get("frequency_current", 0) or 0) + (r.get("frequency_baseline", 0) or 0)
+        vol  = (r.get("volume_eur_current", 0) or 0) + (r.get("volume_eur_baseline", 0) or 0)
+    else:
+        freq = r.get("purchase_days_total", 0) or 0
+        vol  = r.get("lifetime_volume", 0) or 0
+    if freq < MIN_PURCHASES_FOR_LOST or vol < MIN_VOLUME_FOR_LOST:
+        return False
+    mipd = r.get("mean_interpurchase_days")
+    if pd.notna(mipd) and mipd > MAX_CYCLE_FOR_LOST:
+        # Allow if annualised volume is still meaningful
+        ls = r.get("lifespan_days", 365) or 365
+        return _safe_annual(vol, ls) >= 500
+    return True
+
+
+def _dynamic_contact_window(r, default_win):
+    """Adapt contact window to the client's individual purchase cycle."""
+    mipd = r.get("mean_interpurchase_days")
+    if mipd is None or pd.isna(mipd):
+        return default_win
+    rec = r.get("recency_days", 0) or 0
+    days_until_expected = mipd - rec
+    if days_until_expected <= 0:
+        return max(2, default_win // 4)        # already overdue — act fast
+    return min(int(days_until_expected), default_win)
+
+
 def _commodity_alert(r):
     seg = r["segment"]
     if seg == "lost":
+        # Only fire `lost` for clients who really were cyclic — otherwise no alert
+        if not _is_cyclic_client(r, "commodity"):
+            return None
         rec = r["recency_days"] if pd.notna(r["recency_days"]) else 365
-        impact = max(0.0, r["volume_eur_baseline"]) * 0.3   # discounted — recovery is hard
-        urg = 0.2  # low urgency
-        conv = 0.10  # already lost — recovery is unlikely
+        impact = max(0.0, r["volume_eur_baseline"])    # full baseline — they were valuable
+        urg, conv = 0.30, 0.15                          # low odds, low urgency
         tipo = "lost"
-        motivo = f"Cliente perdido (>{int(rec)}d sin compra): campaña de recuperación"
-        prio = "Low"
-        canal, win = "televenta", 90
+        motivo = (f"Lost client: {int(rec)}d without buying (>270d). "
+                  f"Used to buy ~€{impact:,.0f}/yr in baseline.")
+        prio = "High" if impact > 1000 else "Medium"
+        canal, win = "delegado", _dynamic_contact_window(r, 7)
     elif seg == "promiscuous":
-        impact = max(0.0, (r["potencial_h"] or 0) - r["volume_eur_current"])
-        urg, tipo = 0.7, "capture_window"
-        # conversion_probability: closer to loyal = higher prob (capped at 1.0)
+        # Realistic capture: 30-50% growth on what they already buy, NOT full gap-to-potential
         share = r["share_of_potential"] or 0
+        curr = max(0.0, r["volume_eur_current"])
+        impact = max(0.0, curr * 0.5) if share < 0.3 else max(0.0, curr * 0.3)
+        urg, tipo = 0.7, "capture_window"
         conv = min(1.0, max(0.10, share / 0.30))
-        motivo = (f"Cliente promiscuo: capturado {share:.0%} del potencial; "
-                  f"€{impact:,.0f} de demanda desviada a competencia")
+        motivo = (f"Promiscuous client: capturing {share:.0%} of estimated potential. "
+                  f"Realistic growth margin: ~€{impact:,.0f}.")
         prio = "High" if impact > 1500 else ("Medium" if impact > 500 else "Low")
         canal = "delegado" if prio == "High" else "televenta"
-        win = 7 if prio == "High" else (30 if prio == "Medium" else 90)
+        win = _dynamic_contact_window(r, 7 if prio == "High" else (30 if prio == "Medium" else 90))
+        if prio == "Low":
+            canal = "marketing_automation"
+            win = max(win, 30)
     elif seg == "churn_risk_silent":
         impact = max(0.0, r["volume_eur_baseline"])
         rec = r["recency_days"] if pd.notna(r["recency_days"]) else 365
         urg = max(0.2, 1.0 - max(0, rec - 180) / 365)
-        # conversion decays with recency — recoverable in first 6 months
         conv = max(0.10, 1.0 - max(0, rec - 90) / 365)
         tipo = "silent"
-        motivo = f"Cliente leal silencioso: €{impact:,.0f}/año en baseline; sin compra desde {rec:.0f}d"
+        motivo = (f"Loyal client gone silent: ~€{impact:,.0f}/yr in baseline; "
+                  f"no purchase for {int(rec)}d.")
         prio = "High" if (impact > 1000 and rec < 365) else "Medium"
         canal = "delegado" if prio == "High" else "televenta"
-        win = 7 if prio == "High" else 30
+        win = _dynamic_contact_window(r, 7 if prio == "High" else 30)
     else:  # churn_risk_dropping
         impact = max(0.0, r["volume_eur_baseline"] - r["volume_eur_current"])
         urg, tipo = 0.9, "churn_risk"
-        # still buying, just less — high conversion if caught early
         conv = 0.65
-        motivo = f"Caída sostenida: €{r['volume_eur_baseline']:,.0f}→€{r['volume_eur_current']:,.0f}"
+        drop_pct = (1 - r["volume_eur_current"] / max(1, r["volume_eur_baseline"])) * 100
+        motivo = (f"Sustained drop: €{r['volume_eur_baseline']:,.0f} → "
+                  f"€{r['volume_eur_current']:,.0f} (-{drop_pct:.0f}%).")
         prio = "High" if impact > 1500 else "Medium"
         canal = "delegado" if prio == "High" else "televenta"
-        win = 7 if prio == "High" else 30
+        win = _dynamic_contact_window(r, 7 if prio == "High" else 30)
     return tipo, motivo, prio, impact, urg, canal, win, conv
 
 
@@ -346,37 +503,53 @@ def _technical_alert(r):
     if pat == "systematic_deterioration":
         impact = max(0.0, r["expected_vol_recent"] - r["volume_recent"]) * 4
         urg, tipo = 0.95, "churn_risk"
-        conv = 0.55  # active and slipping — moderate recovery odds
-        motivo = (f"Cliente sistemático deteriorándose: €{r['volume_recent']:,.0f} vs "
-                  f"esperado €{r['expected_vol_recent']:,.0f}")
+        conv = 0.55
+        motivo = (f"Systematic client deteriorating: €{r['volume_recent']:,.0f} "
+                  f"vs expected €{r['expected_vol_recent']:,.0f}.")
         prio = "High" if impact > 2000 else "Medium"
-        canal, win = "delegado", 7
+        canal = "delegado"
+        win = _dynamic_contact_window(r, 7)
     elif pat == "systematic_silent":
-        ls = r["lifespan_days"] if pd.notna(r["lifespan_days"]) and r["lifespan_days"] > 0 else 365
-        annual = (r["lifetime_volume"] / ls) * 365
+        annual = _safe_annual(r["lifetime_volume"], r.get("lifespan_days"))
         impact = max(0.0, annual)
         rec = r["recency_days"]
         urg = max(0.2, 1.0 - max(0, rec - 180) / 365)
         conv = max(0.10, 1.0 - max(0, rec - 90) / 365)
         tipo = "silent"
-        motivo = f"Cliente sistemático silencioso: ~€{annual:,.0f}/año en histórico, sin compra {rec:.0f}d"
+        motivo = (f"Systematic client gone silent: ~€{annual:,.0f}/yr historic, "
+                  f"no activity for {int(rec)}d.")
         prio = "High" if (impact > 5000 and rec < 365) else "Medium"
-        canal, win = "delegado", (7 if prio == "High" else 30)
+        canal = "delegado" if prio == "High" else "televenta"
+        win = _dynamic_contact_window(r, 7 if prio == "High" else 30)
     elif pat == "occasional_silent":
         impact = max(0.0, r["volume_baseline"])
         urg, tipo = 0.5, "silent"
-        conv = 0.30  # occasional buyers reactivate less reliably
-        motivo = f"Cliente ocasional sin compra reciente: €{impact:,.0f} en período baseline"
+        conv = 0.30
+        motivo = f"Occasional client with no recent purchase: €{impact:,.0f} in baseline."
         prio = "Medium" if impact > 500 else "Low"
-        canal, win = "televenta", (30 if prio == "Medium" else 90)
+        canal = "televenta" if prio == "Medium" else "marketing_automation"
+        win = 30 if prio == "Medium" else 90
+    elif pat == "lost":
+        # Technical lost — gate by cyclic-client filter
+        if not _is_cyclic_client(r, "technical"):
+            return None
+        annual = _safe_annual(r["lifetime_volume"], r.get("lifespan_days"))
+        impact = max(0.0, annual)
+        urg, conv = 0.30, 0.15
+        tipo = "lost"
+        rec = r["recency_days"]
+        motivo = (f"Lost client (technical): {int(rec)}d without buying. "
+                  f"Historic volume: ~€{impact:,.0f}/yr.")
+        prio = "High" if impact > 2000 else "Medium"
+        canal, win = "delegado", _dynamic_contact_window(r, 7)
     else:  # spike
         impact = max(0.0, r["volume_recent"] - r["expected_vol_recent"])
         urg, tipo = 0.4, "opportunity_spike"
-        conv = 0.50  # half are real, half are noise
-        motivo = (f"Pico anómalo: €{r['volume_recent']:,.0f} vs esperado €{r['expected_vol_recent']:,.0f} "
-                  f"— investigar oportunidad")
+        conv = 0.50
+        motivo = (f"Anomalous spike: €{r['volume_recent']:,.0f} vs expected "
+                  f"€{r['expected_vol_recent']:,.0f} — investigate opportunity.")
         prio = "Medium" if impact > 1000 else "Low"
-        canal = "delegado" if prio == "Medium" else "televenta"
+        canal = "televenta" if prio == "Medium" else "marketing_automation"
         win = 30
     return tipo, motivo, prio, impact, urg, canal, win, conv
 
@@ -389,7 +562,10 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
 
     for _, r in comm_seg[comm_seg["segment"].isin(
             ["promiscuous", "churn_risk_silent", "churn_risk_dropping", "lost"])].iterrows():
-        tipo, motivo, prio, impact, urg, canal, win, conv = _commodity_alert(r)
+        result = _commodity_alert(r)
+        if result is None:
+            continue
+        tipo, motivo, prio, impact, urg, canal, win, conv = result
         rows.append({
             "id_cliente": r["id_cliente"],
             "bloque_analitico": "Commodities",
@@ -418,8 +594,11 @@ def build_alerts(comm_seg: pd.DataFrame, tech_pat: pd.DataFrame,
 
     for _, r in tech_pat[tech_pat["pattern"].isin([
             "systematic_deterioration", "systematic_silent", "occasional_silent",
-            "systematic_spike", "occasional_spike"])].iterrows():
-        tipo, motivo, prio, impact, urg, canal, win, conv = _technical_alert(r)
+            "systematic_spike", "occasional_spike", "lost"])].iterrows():
+        result = _technical_alert(r)
+        if result is None:
+            continue
+        tipo, motivo, prio, impact, urg, canal, win, conv = result
         rows.append({
             "id_cliente": r["id_cliente"],
             "bloque_analitico": "Productos Técnicos",
