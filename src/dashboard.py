@@ -1,186 +1,473 @@
 """
-Smart Demand Signals — interactive demo dashboard.
+Smart Demand Signals — minimalist dashboard.
 
-Run with:
-    streamlit run src/dashboard.py
+Two main views:
+  1. Client view  — single-client deep dive with the right action call-out
+  2. Monitoring   — KPIs, trends, priority list
+
+Plus:
+  3. Learning loop — feedback metrics + threshold suggestions
+
+Run:  streamlit run src/dashboard.py
 """
 import json
+import sys
 from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
-import sys; sys.path.insert(0, str(ROOT / "src"))
-from smart_demand_signals import generate_alerts, load_data
+sys.path.insert(0, str(ROOT / "src"))
+from smart_demand_signals import (
+    generate_alerts, load_data, build_client_profiles,
+    filter_commercial_activity,
+)
 from learning_loop import compute_metrics, recommend_threshold_adjustments
 from crm_export import export_alerts
 
+
 st.set_page_config(page_title="Smart Demand Signals", layout="wide", page_icon="📊")
 
-# ----- Data loading (cached) -----
+
+# ====================================================================
+# 4-CATEGORY MAPPING
+# Collapses 5 alert types into 4 sales-team-readable categories.
+# ====================================================================
+def _map_category(alert_row) -> str:
+    tipo = alert_row["tipo_alerta"]
+    seg = alert_row.get("segment_or_pattern", "")
+    if tipo == "lost":
+        return "lost_client"
+    if tipo == "churn_risk":
+        return "loss_risk"
+    if tipo == "silent":
+        # occasional_silent → opportunity (not a critical loss)
+        # systematic_silent / churn_risk_silent → loss risk
+        if seg == "occasional_silent":
+            return "sales_opportunity"
+        return "loss_risk"
+    if tipo in ("capture_window", "opportunity_spike"):
+        return "sales_opportunity"
+    return "sales_opportunity"
+
+
+CATEGORY_CONFIG = {
+    "lost_client": {
+        "label": "LOST CLIENT",
+        "color": "red",
+        "emoji": "🔴",
+        "action": "Periodic reminder — schedule auto-emails every 30 days so the client remembers us",
+        "action_short": "Periodic reminder",
+    },
+    "loss_risk": {
+        "label": "LOSS RISK",
+        "color": "orange",
+        "emoji": "🟠",
+        "action": "Urgent visit or call — contact to understand the situation and try to retain the client",
+        "action_short": "Urgent visit/call",
+    },
+    "sales_opportunity": {
+        "label": "SALES OPPORTUNITY",
+        "color": "orange",
+        "emoji": "🟡",
+        "action": "Telesales follow-up — contact to offer additional products and explore growth",
+        "action_short": "Telesales follow-up",
+    },
+    "no_risk": {
+        "label": "HEALTHY",
+        "color": "green",
+        "emoji": "🟢",
+        "action": "Restock follow-up — schedule a reminder email near the next expected purchase",
+        "action_short": "Restock email",
+    },
+}
+
+
+# ====================================================================
+# CACHED LOADERS
+# ====================================================================
 @st.cache_data(show_spinner="Loading data...")
 def _load():
     return load_data()
+
 
 @st.cache_data(show_spinner="Generating alerts...")
 def _alerts(date_str: str):
     return generate_alerts(date_str, data=_load())
 
-# ----- Sidebar controls -----
-st.sidebar.title("⚙️ Controls")
+
+@st.cache_data(show_spinner="Building client profiles...")
+def _profiles(date_str: str):
+    data = _load()
+    v = filter_commercial_activity(data["ventas"], pd.Timestamp(date_str))
+    return build_client_profiles(v, data["potencial"], pd.Timestamp(date_str))
+
+
+# ====================================================================
+# HEADER
+# ====================================================================
 data = _load()
-min_date = data["ventas"]["fecha"].min().date()
 max_date = data["ventas"]["fecha"].max().date()
+min_date = data["ventas"]["fecha"].min().date()
 
-ref = st.sidebar.date_input("Reference date (as-of)",
-                            value=max_date, min_value=min_date, max_value=max_date)
-alerts = _alerts(ref.isoformat())
+top0, top1, top2 = st.columns([0.4, 4, 1])
+with top0:
+    with st.popover("ℹ️", help="Alert category guide"):
+        st.markdown("#### How to read the alerts")
+        st.markdown("---")
+        st.markdown("##### 🔴 Lost client")
+        st.markdown(
+            "The client has been **silent for 270+ days** and previously had a regular "
+            "purchase pattern. No longer counted as active. "
+            "**What to do:** schedule periodic reminders (auto-email every 30 days) to stay top-of-mind.")
+        st.markdown("##### 🟠 Loss risk")
+        st.markdown(
+            "The client **was buying well but has started to slip**: either gone silent (a loyal/"
+            "systematic client without recent activity) or volume has dropped >50%. "
+            "**What to do:** urgent contact (visit or call) to understand what is happening and retain them.")
+        st.markdown("##### 🟡 Sales opportunity")
+        st.markdown(
+            "There is room to sell more to this client. Could be a **promiscuous client** (buys "
+            "from Inibsa and from competitors), an **anomalous activity spike** (bought far more than usual), "
+            "or an **occasional client** who has not returned recently. "
+            "**What to do:** telesales follow-up to offer products and see if they want to grow with us.")
+        st.markdown("##### 🟢 Healthy")
+        st.markdown(
+            "The client is **buying normally**. No urgent action needed. "
+            "**What to do:** schedule a restock email near the next expected purchase to keep the "
+            "commercial relationship active.")
+        st.markdown("---")
+        st.markdown("##### Detail by product family")
+        st.markdown(
+            "**Commodities** (anaesthesia, needles, disinfection): recurring purchases. We track "
+            "the share of potential captured and the trend.\n\n"
+            "**Technical products** (biomaterials): more variable purchases. We track whether the pattern "
+            "is systematic (≤90d cycle) or occasional, and compare recent activity to a year-ago baseline.")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Filters (Alerts tab)")
-prio_filter = st.sidebar.multiselect("Prioridad",
-                                     options=sorted(alerts["prioridad"].unique()),
-                                     default=["High", "Medium"])
-tipo_filter = st.sidebar.multiselect("Tipo de alerta",
-                                     options=sorted(alerts["tipo_alerta"].unique()),
-                                     default=sorted(alerts["tipo_alerta"].unique()))
-canal_filter = st.sidebar.multiselect("Canal",
-                                      options=sorted(alerts["canal_recomendado"].unique()),
-                                      default=sorted(alerts["canal_recomendado"].unique()))
-bloque_filter = st.sidebar.multiselect("Bloque analítico",
-                                       options=sorted(alerts["bloque_analitico"].unique()),
-                                       default=sorted(alerts["bloque_analitico"].unique()))
-client_search = st.sidebar.text_input("🔍 Cliente search (id_cliente)", value="")
+top1.markdown("## ⚙️ Smart Demand Signals")
+ref = top2.date_input("Date", value=max_date, min_value=min_date, max_value=max_date,
+                      label_visibility="collapsed")
+ref_str = ref.isoformat()
 
-f = alerts[
-    alerts["prioridad"].isin(prio_filter)
-    & alerts["tipo_alerta"].isin(tipo_filter)
-    & alerts["canal_recomendado"].isin(canal_filter)
-    & alerts["bloque_analitico"].isin(bloque_filter)
-]
-if client_search.strip():
-    f = f[f["id_cliente"].str.contains(client_search.strip(), case=False, na=False)]
+alerts = _alerts(ref_str)
+profiles = _profiles(ref_str)
 
-# ----- Header -----
-st.title("📊 Smart Demand Signals")
-st.markdown(f"**Inibsa · Interhack BCN 2026** — Daily alert generator for {ref}")
+if len(alerts) > 0:
+    alerts["category"] = alerts.apply(_map_category, axis=1)
 
-tab_alerts, tab_learning, tab_profile = st.tabs(["📋 Alerts", "📈 Learning loop", "🔍 Client profile"])
 
 # ====================================================================
-# TAB 1 — Alerts
+# TABS
 # ====================================================================
-with tab_alerts:
-    # Campaign banner if as-of date falls in a campaign window
-    if not alerts.empty and bool(alerts["campaign_active"].iloc[0]):
-        cname = alerts["campaign_name"].iloc[0]
-        st.info(f"🎯 **Campaign window active: `{cname}`** — alerts firing during a campaign "
-                f"may include campaign-driven volume noise. Treat anomaly_high signals "
-                f"with extra scrutiny.", icon="🎯")
+tab_client, tab_monitor, tab_learning = st.tabs([
+    "🔍 Client view", "📊 Monitoring", "📈 Learning loop"
+])
 
-    # Holiday banner — explains why some drop signals were suppressed
-    if not alerts.empty and bool(alerts["holiday_period"].iloc[0]):
-        st.info(f"🏖️ **Holiday period active** (August / Christmas week / Reyes) — "
-                f"technical-product drops are suppressed unless YoY comparison also "
-                f"shows a >50% decline. Avoids treating seasonal pauses as churn.",
-                icon="🏖️")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total alerts", f"{len(f):,}", delta=f"of {len(alerts):,} unfiltered")
-    c2.metric("High priority", f"{(f['prioridad']=='High').sum():,}")
-    c3.metric("Expected impact", f"€{f['expected_impact_eur'].sum():,.0f}")
-    c4.metric("Top alert score", f"{f['score'].max():,.0f}" if len(f) else "—")
+# ====================================================================
+# TAB 1 — CLIENT VIEW
+# ====================================================================
+with tab_client:
+    all_clients = sorted(profiles["id_cliente"].unique()) if len(profiles) > 0 else []
+    alerted = set(alerts["id_cliente"].unique()) if len(alerts) > 0 else set()
+    ordered = [c for c in all_clients if c in alerted] + [c for c in all_clients if c not in alerted]
+
+    selected = st.selectbox(
+        "Client",
+        options=ordered,
+        format_func=lambda c: f"⚠️ {c}" if c in alerted else c,
+        label_visibility="collapsed",
+        placeholder="Search a client...",
+    )
+
+    if selected:
+        cp_row = profiles[profiles["id_cliente"] == selected]
+        cl_alerts = alerts[alerts["id_cliente"] == selected] if len(alerts) > 0 else pd.DataFrame()
+        cl_info = data["clientes"][data["clientes"]["id_cliente"] == selected]
+        prov = cl_info["provincia"].iloc[0] if len(cl_info) > 0 else "—"
+
+        # --- Determine top category ---
+        if len(cl_alerts) > 0:
+            top_alert = cl_alerts.iloc[0]
+            cat = _map_category(top_alert)
+        else:
+            cat = "no_risk"
+        cfg = CATEGORY_CONFIG[cat]
+
+        # --- Banner ---
+        st.markdown(f"### {cfg['emoji']} :{cfg['color']}[{cfg['label']}]")
+        if len(cl_alerts) > 0:
+            st.caption(top_alert["motivo"])
+        else:
+            st.caption("Active client behaving normally. No alerts on the selected date.")
+
+        # --- Action card ---
+        if cat == "no_risk":
+            if len(cp_row) > 0:
+                cp = cp_row.iloc[0]
+                cycle = cp.get("mean_interpurchase_days")
+                rec = cp.get("recency_days")
+                if pd.notna(cycle) and cycle > 0 and pd.notna(rec):
+                    days_left = cycle - rec
+                    if days_left > 0:
+                        st.success(
+                            f"**{cfg['action_short']}** — Estimated restock in **~{days_left:.0f} days**. "
+                            f"Schedule a follow-up email for then.")
+                    else:
+                        st.warning(
+                            f"**{cfg['action_short']}** — Client may need restock **now** "
+                            f"(avg cycle {cycle:.0f}d, last purchase {rec:.0f}d ago). Send follow-up email.")
+                else:
+                    st.success(f"**{cfg['action_short']}** — No defined cycle. Send periodic follow-up to maintain the relationship.")
+            else:
+                st.success(f"**{cfg['action_short']}** — Send periodic follow-up email.")
+        elif cat == "lost_client":
+            st.error(
+                f"**{cfg['action_short']}** — The client has stopped buying. Schedule automatic reminders "
+                f"(email every 30 days) so they remember us when they need product again.")
+        elif cat == "loss_risk":
+            days = top_alert["contact_window_days"] if len(cl_alerts) > 0 else 7
+            st.warning(
+                f"**{cfg['action_short']}** — Contact within **{days} days**. "
+                f"Understand why the client has stopped or reduced and try to retain them.")
+        elif cat == "sales_opportunity":
+            days = top_alert["contact_window_days"] if len(cl_alerts) > 0 else 30
+            st.info(
+                f"**{cfg['action_short']}** — Call within **{days} days** to follow up, "
+                f"offer additional products and explore whether they want to grow purchases with Inibsa.")
+
+        st.markdown("---")
+
+        # --- Key stats ---
+        if len(cp_row) > 0:
+            cp = cp_row.iloc[0]
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("📍 Province", prov)
+            c2.metric("Last purchase",
+                      cp["last_purchase"].strftime("%d/%m/%Y") if pd.notna(cp["last_purchase"]) else "—")
+
+            rec = cp["recency_days"]
+            cycle = cp["mean_interpurchase_days"]
+            c3.metric("Days since last purchase", f"{rec:.0f}" if pd.notna(rec) else "—")
+
+            if pd.notna(cycle) and cycle > 0:
+                c4.metric("Avg cycle", f"{cycle:.0f} days")
+                progress = rec / cycle if pd.notna(rec) else 0
+                if progress > 1.2:
+                    c5.metric("Cycle status", "⚠️ Overdue",
+                              delta=f"{(progress - 1) * 100:+.0f}%", delta_color="inverse")
+                elif progress > 0.8:
+                    c5.metric("Cycle status", "⏳ Due soon",
+                              delta=f"{(1 - progress) * cycle:.0f} days left")
+                else:
+                    c5.metric("Cycle status", "✅ Within window")
+            else:
+                c4.metric("Avg cycle", "—")
+                c5.metric("Cycle status", "—")
+
+            c6, c7, c8 = st.columns(3)
+            trend = cp["potential_trend"]
+            c6.metric("Trend (6m vs prior)",
+                      f"{trend:+.0%}" if pd.notna(trend) else "—",
+                      delta=f"{trend:+.0%}" if pd.notna(trend) else None,
+                      delta_color="normal" if pd.notna(trend) and trend >= 0 else "inverse")
+
+            sop = cp["share_of_potential"]
+            if pd.isna(sop):
+                sop_label = "—"
+            elif sop > 1:
+                sop_label = ">100%"
+            else:
+                sop_label = f"{sop:.0%}"
+            c7.metric("Share of potential (12m)", sop_label,
+                      help="Trailing-12-month volume / annual potential. >100% means real sales exceeded the declared estimate.")
+
+            c8.metric("Last 12m volume", f"€{cp['eur_last_12m']:,.0f}")
+
+        st.markdown("---")
+
+        # --- Purchase history chart ---
+        v = data["ventas"]
+        cl_hist = v[(v["id_cliente"] == selected) & (~v["cliente_no_registrado"])].copy()
+        if len(cl_hist) > 0:
+            st.markdown("##### Purchase history")
+            cl_hist["fecha"] = pd.to_datetime(cl_hist["fecha"])
+            cl_hist["month"] = cl_hist["fecha"].dt.to_period("M")
+            monthly = cl_hist.groupby("month").agg(total_eur=("valores_h", "sum")).reset_index()
+            monthly["month_str"] = monthly["month"].astype(str)
+            monthly["3-month avg"] = monthly["total_eur"].rolling(3, min_periods=1).mean()
+            chart = monthly.rename(columns={"month_str": "Month", "total_eur": "Sales (€)"})[
+                ["Month", "Sales (€)", "3-month avg"]].set_index("Month")
+            st.line_chart(chart, height=280)
+
+            with st.expander("By product family"):
+                fam = cl_hist.groupby([cl_hist["fecha"].dt.to_period("M"), "familia_h"]).agg(
+                    t=("valores_h", "sum")).reset_index()
+                fam["m"] = fam["fecha"].astype(str)
+                fp = fam.pivot_table(index="m", columns="familia_h", values="t", fill_value=0)
+                st.area_chart(fp, height=250)
+
+        # --- Alerts detail ---
+        if len(cl_alerts) > 0:
+            with st.expander(f"📋 Alert details ({len(cl_alerts)})"):
+                for _, a in cl_alerts.iterrows():
+                    a_cat = _map_category(a)
+                    a_cfg = CATEGORY_CONFIG[a_cat]
+                    st.markdown(
+                        f"{a_cfg['emoji']} **{a_cfg['label']}** · {a['familia']} · "
+                        f"Score {a['score']:,.0f} · {a_cfg['action_short']}"
+                    )
+                    st.caption(a["motivo"])
+
+        # --- Raw history ---
+        with st.expander("📄 Detailed transaction history"):
+            if len(cl_hist) > 0:
+                show_n = st.slider("Show last N purchases", 10, 100, 20, key="h")
+                hd = cl_hist.tail(show_n)[
+                    ["fecha", "familia_h", "unidades", "valores_h", "tipo_transaccion"]].copy()
+                hd["fecha"] = hd["fecha"].dt.strftime("%d/%m/%Y")
+                hd["valores_h"] = hd["valores_h"].map(lambda x: f"€{x:,.2f}")
+                hd.columns = ["Date", "Family", "Units", "Amount", "Type"]
+                st.dataframe(hd, use_container_width=True, hide_index=True)
+
+
+# ====================================================================
+# TAB 2 — MONITORING
+# ====================================================================
+with tab_monitor:
+    if len(alerts) > 0:
+        n_lost = (alerts["category"] == "lost_client").sum()
+        n_risk = (alerts["category"] == "loss_risk").sum()
+        n_oppt = (alerts["category"] == "sales_opportunity").sum()
+    else:
+        n_lost = n_risk = n_oppt = 0
+    n_healthy = len(profiles) - alerts["id_cliente"].nunique() if len(alerts) > 0 else len(profiles)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("🔴 Lost clients", f"{n_lost:,}")
+    k2.metric("🟠 Loss risk", f"{n_risk:,}")
+    k3.metric("🟡 Opportunities", f"{n_oppt:,}")
+    k4.metric("🟢 Healthy", f"{n_healthy:,}", help="Active clients with no active alerts")
 
     st.markdown("---")
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("##### By tipo de alerta")
-        chart_data = f["tipo_alerta"].value_counts().reset_index()
-        chart_data.columns = ["tipo_alerta", "count"]
-        st.bar_chart(chart_data, x="tipo_alerta", y="count")
+        st.markdown("##### By alert category")
+        if len(alerts) > 0:
+            cat_c = alerts["category"].value_counts().reset_index()
+            cat_c.columns = ["Category", "Count"]
+            cat_labels = {
+                "lost_client": "🔴 Lost client",
+                "loss_risk": "🟠 Loss risk",
+                "sales_opportunity": "🟡 Sales opportunity",
+            }
+            cat_c["Category"] = cat_c["Category"].map(lambda x: cat_labels.get(x, x))
+            st.bar_chart(cat_c, x="Category", y="Count", height=280)
     with col_b:
-        st.markdown("##### By canal × prioridad")
-        cross = pd.crosstab(f["canal_recomendado"], f["prioridad"])
-        st.bar_chart(cross)
+        st.markdown("##### By recommended channel")
+        if len(alerts) > 0:
+            canal_c = alerts["canal_recomendado"].value_counts().reset_index()
+            canal_c.columns = ["Channel", "Alerts"]
+            st.bar_chart(canal_c, x="Channel", y="Alerts", height=280)
 
-    # Province distribution
-    if len(f):
-        st.markdown("##### Alerts by provincia (top 15)")
-        prov_counts = f["provincia"].value_counts().head(15).reset_index()
-        prov_counts.columns = ["provincia", "n_alerts"]
-        st.bar_chart(prov_counts, x="provincia", y="n_alerts")
+    st.markdown("---")
 
-    st.markdown("### Top alerts (sorted by score)")
-    top_n = st.slider("How many to show", min_value=10, max_value=200, value=25, step=5)
+    col_p, col_f = st.columns(2)
+    with col_p:
+        st.markdown("##### By province (top 10)")
+        if len(alerts) > 0:
+            prov_agg = (alerts.groupby("provincia")
+                                .agg(alerts=("alert_id", "count"), impact=("score", "sum"))
+                                .reset_index()
+                                .sort_values("impact", ascending=False).head(10))
+            prov_agg.columns = ["Province", "Alerts", "Impact (€)"]
+            prov_agg["Impact (€)"] = prov_agg["Impact (€)"].map(lambda x: f"€{x:,.0f}")
+            st.dataframe(prov_agg, use_container_width=True, hide_index=True)
+    with col_f:
+        st.markdown("##### By product family")
+        if len(alerts) > 0:
+            fam_agg = (alerts.groupby("familia")
+                              .agg(alerts=("alert_id", "count"), impact=("score", "sum"))
+                              .reset_index().sort_values("impact", ascending=False))
+            fam_agg.columns = ["Family", "Alerts", "Impact (€)"]
+            fam_agg["Impact (€)"] = fam_agg["Impact (€)"].map(lambda x: f"€{x:,.0f}")
+            st.dataframe(fam_agg, use_container_width=True, hide_index=True)
 
-    table_cols = ["alert_id", "id_cliente", "provincia", "familia", "tipo_alerta",
-                  "loyalty_tier", "trend", "prioridad", "score",
-                  "expected_impact_eur", "urgency_factor", "conversion_probability",
-                  "canal_recomendado", "contact_window_days", "motivo"]
-    display = f.head(top_n)[table_cols].copy()
-    display["score"] = display["score"].map(lambda x: f"{x:,.0f}")
-    display["expected_impact_eur"] = display["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
-    display["urgency_factor"] = display["urgency_factor"].map(lambda x: f"{x:.2f}")
-    display["conversion_probability"] = display["conversion_probability"].map(lambda x: f"{x:.2f}")
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.markdown("---")
 
-    # Export buttons
-    if len(f):
-        ex_col1, ex_col2 = st.columns(2)
-        with ex_col1:
+    # --- Sales evolution ---
+    v_filt = filter_commercial_activity(data["ventas"], pd.Timestamp(ref_str))
+    st.markdown("##### Monthly sales evolution")
+    v_filt["month"] = v_filt["fecha"].dt.to_period("M")
+    ms = v_filt.groupby("month").agg(sales=("valores_h", "sum")).reset_index()
+    ms["month_str"] = ms["month"].astype(str)
+    ms["6-month rolling"] = ms["sales"].rolling(6, min_periods=1).mean()
+    trend = ms[["month_str", "sales", "6-month rolling"]].rename(
+        columns={"month_str": "Month", "sales": "Sales (€)"}).set_index("Month")
+    st.line_chart(trend, height=300)
+
+    st.markdown("---")
+
+    # --- Priority alerts table ---
+    st.markdown("##### Priority alerts")
+    if len(alerts) > 0:
+        f1, f2 = st.columns(2)
+        cat_opts = sorted(alerts["category"].unique())
+        cat_display = {
+            "lost_client": "🔴 Lost client",
+            "loss_risk": "🟠 Loss risk",
+            "sales_opportunity": "🟡 Sales opportunity",
+        }
+        sel_cat = f1.multiselect("Category", cat_opts,
+                                 default=["loss_risk", "lost_client"],
+                                 format_func=lambda x: cat_display.get(x, x), key="fc")
+        prio_opts = sorted(alerts["prioridad"].unique())
+        sel_prio = f2.multiselect("Priority", prio_opts, default=prio_opts, key="fp")
+
+        filtered = alerts[
+            alerts["category"].isin(sel_cat) & alerts["prioridad"].isin(sel_prio)
+        ]
+        top_n = st.slider("Show top", 10, 100, 25, key="tn")
+        display = filtered.head(top_n)[
+            ["id_cliente", "provincia", "familia", "category",
+             "prioridad", "contact_window_days", "motivo"]].copy()
+        display["category"] = display["category"].map(lambda x: cat_display.get(x, x))
+        display.columns = ["Client", "Prov.", "Family", "Category", "Prio.", "Days", "Motive"]
+        st.dataframe(display, use_container_width=True, hide_index=True)
+
+        # Export buttons
+        ex1, ex2 = st.columns(2)
+        with ex1:
             st.download_button(
-                "⬇️ Download filtered alerts (CSV)",
-                data=f.to_csv(index=False).encode("utf-8"),
-                file_name=f"alerts_{ref}.csv",
+                "⬇️ Filtered alerts (CSV)",
+                data=filtered.to_csv(index=False).encode("utf-8"),
+                file_name=f"alerts_{ref_str}.csv",
                 mime="text/csv",
             )
-        with ex_col2:
-            payloads = export_alerts(f.head(top_n), target="hubspot")
+        with ex2:
+            payloads = export_alerts(filtered.head(top_n), target="hubspot")
             st.download_button(
-                "⬇️ Export top-N as HubSpot Tasks (JSON)",
+                "⬇️ Top-N as HubSpot Tasks (JSON)",
                 data=json.dumps(payloads, indent=2, ensure_ascii=False).encode("utf-8"),
-                file_name=f"alerts_hubspot_{ref}.json",
+                file_name=f"alerts_hubspot_{ref_str}.json",
                 mime="application/json",
             )
 
-    st.markdown("### 🔍 Drill into a single alert")
-    selected_id = st.selectbox("Pick an alert_id", options=f["alert_id"].head(top_n).tolist())
-    if selected_id:
-        row = f[f["alert_id"] == selected_id].iloc[0]
-        cc1, cc2 = st.columns([2, 1])
-        with cc1:
-            st.markdown(f"**Cliente:** `{row['id_cliente']}`  ·  **Provincia:** {row['provincia']}")
-            st.markdown(f"**Familia:** {row['familia']} ({row['familia_comercial']}) · "
-                        f"**Bloque:** {row['bloque_analitico']}")
-            st.markdown(f"**Tipo:** `{row['tipo_alerta']}` · **Prioridad:** `{row['prioridad']}` · "
-                        f"**Canal:** `{row['canal_recomendado']}`")
-            st.markdown(f"**Motivo:** {row['motivo']}")
-            st.markdown(f"**Ventana de contacto:** {row['contact_window_days']} días")
-        with cc2:
-            st.metric("Score", f"{row['score']:,.0f}")
-            st.metric("Impact (€)", f"€{row['expected_impact_eur']:,.0f}")
-            st.metric("Urgency × Conv prob", f"{row['urgency_factor']:.2f} × {row['conversion_probability']:.2f}")
-        st.markdown("**🧩 Trace features (why this alert fired):**")
-        trace = json.loads(row["trace_features"])
-        st.json(trace)
 
 # ====================================================================
-# TAB 2 — Learning loop
+# TAB 3 — LEARNING LOOP
 # ====================================================================
 with tab_learning:
     st.markdown("### Outcome-driven feedback loop")
-
     st.warning(
-        "⚠️ **Demo data — not real outcomes.** The 120 rows in "
-        "`analysis/alert_outcomes.csv` are a calibrated simulation built to "
-        "demonstrate the feedback loop. In production, outcomes would be fed "
-        "by CRM webhooks (HubSpot / Salesforce), sales-team workflow tools, or "
-        "a manual logging form. The schema, module, and dashboard are real; "
-        "only the rows are illustrative.",
+        "⚠️ **Demo data — not real outcomes.** The 120 rows in `analysis/alert_outcomes.csv` are a "
+        "calibrated simulation. In production these come from CRM webhooks, sales-team workflow tools, "
+        "or a manual logging form. The schema, module, and dashboard are real; only the rows are illustrative.",
         icon="⚠️",
     )
-
     metrics = compute_metrics()
 
     if metrics.get("empty"):
@@ -211,13 +498,13 @@ with tab_learning:
         st.markdown("---")
         ll, rr = st.columns(2)
         with ll:
-            st.markdown("##### Effectiveness by canal")
+            st.markdown("##### Effectiveness by channel")
             bc = metrics["by_canal"].copy()
             bc["conversion_rate"]      = bc["conversion_rate"].map(lambda x: f"{x:.1%}")
             bc["revenue_captured_eur"] = bc["revenue_captured_eur"].map(lambda x: f"€{x:,.0f}")
             st.dataframe(bc, use_container_width=True, hide_index=True)
         with rr:
-            st.markdown("##### False-positive reasons (top)")
+            st.markdown("##### Top false-positive reasons")
             fp = metrics["false_positive_reasons"]
             if len(fp):
                 st.dataframe(fp, use_container_width=True, hide_index=True)
@@ -239,119 +526,29 @@ with tab_learning:
 Threshold recommendations  →  Rule update  →  Better alerts""",
             language="text",
         )
-        st.caption("Each outcome adds one row to `analysis/alert_outcomes.csv`. "
-                   "The system never silently drops feedback — every recorded outcome "
-                   "appears here on next refresh.")
+
 
 # ====================================================================
-# TAB 3 — Client profile (drill into one clinic's full story)
+# Footer — architecture
 # ====================================================================
-with tab_profile:
-    st.markdown("### Single-client deep dive")
-    st.caption("Pick a clinic. See everything the system knows about them: alerts "
-               "across product families, segmentation, purchase history.")
-
-    suggested = (alerts.groupby("id_cliente")["score"].sum()
-                 .sort_values(ascending=False).head(20).index.tolist())
-    pick = st.selectbox("Pick a client (top 20 by aggregate score)", options=suggested)
-    typed = st.text_input("...or type any id_cliente", value="")
-    target = (typed.strip() or pick) if (typed.strip() or pick) else None
-
-    if target:
-        # Header info from Clientes
-        cli = data["clientes"]
-        cli_row = cli[cli["id_cliente"].astype(str) == str(target)]
-        if cli_row.empty:
-            st.warning(f"Client `{target}` not in registered Clientes table — "
-                       f"could be `cliente_no_registrado=True` (delegated client).")
-        else:
-            cli_row = cli_row.iloc[0]
-            h1, h2, h3 = st.columns(3)
-            h1.metric("Cliente", str(target))
-            h2.metric("Provincia", cli_row["provincia"])
-            h3.metric("Código postal", cli_row["codigo_postal"])
-
-        # All alerts for this client right now
-        st.markdown("---")
-        st.markdown("##### Active alerts (today)")
-        cli_alerts = alerts[alerts["id_cliente"].astype(str) == str(target)]
-        if cli_alerts.empty:
-            st.success("No active alerts — this client is healthy across all product families.")
-        else:
-            view = cli_alerts[["familia", "tipo_alerta", "loyalty_tier", "trend",
-                               "prioridad", "score", "expected_impact_eur",
-                               "conversion_probability", "motivo"]].copy()
-            view["score"] = view["score"].map(lambda x: f"{x:,.0f}")
-            view["expected_impact_eur"] = view["expected_impact_eur"].map(lambda x: f"€{x:,.0f}")
-            view["conversion_probability"] = view["conversion_probability"].map(lambda x: f"{x:.2f}")
-            st.dataframe(view, use_container_width=True, hide_index=True)
-
-        # Purchase history chart
-        st.markdown("---")
-        st.markdown("##### Purchase history")
-        v = data["ventas"]
-        cli_ventas = v[(v["id_cliente"].astype(str) == str(target))
-                       & (v["tipo_transaccion"] == "venta")].copy()
-        if cli_ventas.empty:
-            st.info("No purchase history found.")
-        else:
-            cli_ventas["fecha"] = pd.to_datetime(cli_ventas["fecha"])
-            cli_ventas["mes"] = cli_ventas["fecha"].dt.to_period("M").astype(str)
-            monthly = (cli_ventas.groupby(["mes", "bloque_analitico"])["valores_h"]
-                       .sum().reset_index())
-            pivot = monthly.pivot(index="mes", columns="bloque_analitico",
-                                  values="valores_h").fillna(0)
-            st.bar_chart(pivot, height=300)
-            ph1, ph2, ph3 = st.columns(3)
-            ph1.metric("Lifetime €", f"€{cli_ventas['valores_h'].sum():,.0f}")
-            ph2.metric("Total purchases", f"{len(cli_ventas):,}")
-            ph3.metric("Last purchase", cli_ventas["fecha"].max().date().isoformat())
-
-        # Segmentation snapshot
-        st.markdown("---")
-        st.markdown("##### Segmentation across product families")
-        v_filtered = data["ventas"][
-            (~data["ventas"]["cliente_no_registrado"])
-            & (data["ventas"]["tipo_transaccion"].isin(["venta", "devolucion"]))
-            & (data["ventas"]["fecha"] <= pd.Timestamp(ref))
-        ]
-        from smart_demand_signals import commodity_segments, technical_patterns
-        cs = commodity_segments(v_filtered, data["potencial"], pd.Timestamp(ref))
-        tp = technical_patterns(v_filtered, pd.Timestamp(ref))
-        cs_cli = cs[cs["id_cliente"].astype(str) == str(target)]
-        tp_cli = tp[tp["id_cliente"].astype(str) == str(target)]
-        cs_view = cs_cli[["categoria_h", "segment", "loyalty_tier", "trend",
-                          "share_of_potential", "volume_eur_current",
-                          "volume_eur_baseline", "potencial_h", "recency_days"]]
-        tp_view = tp_cli[["familia_h", "pattern", "trend", "recency_days",
-                          "frequency_recent", "volume_recent",
-                          "expected_vol_recent", "lifetime_volume"]]
-        st.markdown("**Commodities**")
-        st.dataframe(cs_view if len(cs_view) else pd.DataFrame({"info": ["no commodity activity"]}),
-                     use_container_width=True, hide_index=True)
-        st.markdown("**Productos Técnicos**")
-        st.dataframe(tp_view if len(tp_view) else pd.DataFrame({"info": ["no technical activity"]}),
-                     use_container_width=True, hide_index=True)
-
-# ----- Footer -----
 st.markdown("---")
-with st.expander("ℹ️ Architecture (data → analytical → activation → feedback layers)"):
+with st.expander("ℹ️ Architecture (data → analytical → activation → feedback)"):
     st.markdown("""
-    **Data layer** — cleaned CSVs in `std_data/csv/` (5 sheets: Ventas, Clientes, Productos, Potencial, Campañas)
+**Data layer** — cleaned CSVs in `std_data/csv/` (5 sheets: Ventas, Clientes, Productos, Potencial, Campañas)
 
-    **Analytical layer** — two segmentation modules:
-    - *Commodities*: share-of-potential rule → loyal / promiscuous / marginal / churn_risk
-    - *Technical*: individual-baseline rule (90d vs 91-365d) → systematic_active / silent / deterioration / occasional_*
+**Analytical layer** — two segmentation modules:
+- *Commodities* (anaesthesia, biosecurity): share-of-potential rule → loyal / promiscuous / marginal / churn_risk / lost
+- *Technical* (biomaterials): individual-baseline rule with year-over-year comparison → systematic_active / silent / deterioration / occasional_* / lost
 
-    **Activation layer** — alert generator emitting:
-    - `id_cliente × familia × tipo_alerta × motivo × prioridad × score × canal × ventana × trace_features`
-    - Sorted by `score = expected_impact_eur × urgency_factor`
-    - Routed to `delegado` / `televenta` based on priority
+**Activation layer** — alert generator:
+- `id_cliente × familia × tipo × motive × dynamic-window`
+- `score = expected_impact × urgency × conversion_probability` (all four prioritisation signals from the brief)
+- Routed to `delegado` / `televenta` / `marketing_automation`
 
-    **Feedback layer** — `alert_outcomes.csv` records action + result per alert, fed back into:
-    - Conversion rate per `tipo_alerta` (precision)
-    - False-positive flagging
-    - Threshold-tuning recommendations
+**Feedback layer** — `alert_outcomes.csv` records action + result, fed back into:
+- Conversion rate per `tipo_alerta` (precision)
+- False-positive flagging
+- Threshold-tuning recommendations
 
-    **Daily cadence** — `generate_alerts(as_of_date)` recomputes alerts for any date.
-    """)
+**Daily cadence** — `generate_alerts(as_of_date)` recomputes alerts for any date.
+""")
